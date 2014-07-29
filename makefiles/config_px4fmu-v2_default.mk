@@ -10,6 +10,13 @@ ROMFS_ROOT	 = $(PX4_BASE)/ROMFS/px4fmu_common
 ROMFS_OPTIONAL_FILES = $(PX4_BASE)/Images/px4io-v2_default.bin
 
 #
+# Own App
+#
+MODULES		+= modules/px4_base_app
+
+
+
+#
 # Board support modules
 #
 MODULES		+= drivers/device
@@ -125,6 +132,7 @@ MODULES		+= lib/geo
 MODULES		+= lib/geo_lookup
 MODULES		+= lib/conversion
 MODULES		+= lib/launchdetection
+
 
 #
 # Demo apps
