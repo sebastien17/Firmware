@@ -13,8 +13,8 @@ ROMFS_OPTIONAL_FILES = $(PX4_BASE)/Images/px4io-v2_default.bin
 # Own App
 #
 MODULES		+= modules/px4_base_app
-
-
+MODULES		+= modules/px4_adc_reader_app
+MODULES		+= modules/px4_sonar_ca_app
 
 #
 # Board support modules

@@ -45,6 +45,9 @@
 
 #include <drivers/drv_orb_dev.h>
 
+#include "topics/adc_raw_data.h"			/*Added for adc raw data topic*/
+ORB_DEFINE(adc_raw_data, adc_raw_data_s);
+
 #include <drivers/drv_mag.h>
 ORB_DEFINE(sensor_mag0, struct mag_report);
 ORB_DEFINE(sensor_mag1, struct mag_report);

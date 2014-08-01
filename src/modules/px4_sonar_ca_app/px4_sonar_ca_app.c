@@ -33,7 +33,7 @@
  ****************************************************************************/
 
 /**
- * @file px4_base_app.c
+ * @file px4_sonar_ca_app.c
  * Daemon application example for PX4 autopilot
  */
 
@@ -45,7 +45,7 @@
 #include <poll.h>
 
 #include <uORB/uORB.h>
-#include <uORB/topics/sensor_combined.h>
+#include <uORB/topics/adc_raw_data.h>
 
 #include <systemlib/systemlib.h>
 #include <systemlib/err.h>
@@ -57,12 +57,12 @@ static int daemon_task;				/**< Handle of daemon task / thread */
 
 
 /*Declaration functions*/
-__EXPORT int px4_base_app_main(int argc, char *argv[]);   /*px4_base_app daemon management function*/
-int px4_base_app_thread(int argc, char *argv[]);            /*px4_base_app daemon main loop*/
-static void usage(const char *reason);                          /*Print correct usage of px4_base_app*/
+__EXPORT int px4_sonar_ca_app_main(int argc, char *argv[]);   /*px4_sonar_ca_app daemon management function*/
+int px4_sonar_ca_app_thread(int argc, char *argv[]);            /*px4_sonar_ca_app daemon main loop*/
+static void usage(const char *reason);                          /*Print correct usage of px4_sonar_ca_app*/
 
 
-int px4_base_app_main(int argc, char *argv[])
+int px4_sonar_ca_app_main(int argc, char *argv[])
 {
 	if (argc < 1)
 		usage("missing command");
@@ -80,7 +80,7 @@ int px4_base_app_main(int argc, char *argv[])
 					     SCHED_RR,
 					     SCHED_PRIORITY_DEFAULT,
 					     4096,
-					     px4_base_app_thread,
+					     px4_sonar_ca_app_thread,
 					     (argv) ? (const char **)&argv[2] : (const char **)NULL);
 		thread_running = true;
 		exit(0);
@@ -103,18 +103,18 @@ int px4_base_app_main(int argc, char *argv[])
 	exit(1);
 }
 
-int px4_base_app_thread(int argc, char *argv[])
+int px4_sonar_ca_app_thread(int argc, char *argv[])
 {
-	warnx("[daemon] px4_base_app starting\n");
+	warnx("[daemon] px4_sonar_ca_app starting\n");
     thread_running = true;
 	/* subscribe to sensor_combined topic */
-	int sensor_sub_fd = orb_subscribe(ORB_ID(sensor_combined));
+	int adc_raw_data_sub_fd = orb_subscribe(ORB_ID(adc_raw_data));
     /*limit our topic update to 1 Hz */
-    orb_set_interval(sensor_sub_fd, 1000);
+    orb_set_interval(adc_raw_data_sub_fd, 1000);
 
 	/* one could wait for multiple topics with this technique, just using one here */
 	struct pollfd fds[] = {
-		{ .fd = sensor_sub_fd,   .events = POLLIN },
+		{ .fd = adc_raw_data_sub_fd,   .events = POLLIN },
 		/* there could be more file descriptors here, in the form like:
 		 * { .fd = other_sub_fd,   .events = POLLIN },
 		 */
@@ -129,12 +129,12 @@ int px4_base_app_thread(int argc, char *argv[])
 		/* handle the poll result */
 		if (poll_ret == 0) {
 			/* this means none of our providers is giving us data */
-			printf("[px4_simple_app] Got no data within a second\n");
+			printf("[px4_sonar_ca_app] Got no data within a second\n");
 		} else if (poll_ret < 0) {
 			/* this is seriously bad - should be an emergency */
 			if (error_counter < 10 || error_counter % 50 == 0) {
 				/* use a counter to prevent flooding (and slowing us down) */
-				printf("[px4_simple_app] ERROR return value from poll(): %d\n"
+				printf("[px4_sonar_ca_app] ERROR return value from poll(): %d\n"
 					, poll_ret);
 			}
 			error_counter++;
@@ -142,20 +142,23 @@ int px4_base_app_thread(int argc, char *argv[])
 
 			if (fds[0].revents & POLLIN) {
 				/* obtained data for the first file descriptor */
-				struct sensor_combined_s raw;
-				/* copy sensors raw data into local buffer */
-				orb_copy(ORB_ID(sensor_combined), sensor_sub_fd, &raw);
-				printf("[px4_simple_app] Accelerometer:\t%8.4f\t%8.4f\t%8.4f\n",
-					(double)raw.accelerometer_m_s2[0],
-					(double)raw.accelerometer_m_s2[1],
-					(double)raw.accelerometer_m_s2[2]);
+				adc_raw_data_s raw;
+				/* copy adc raw data into local buffer */
+				orb_copy(ORB_ID(adc_raw_data), adc_raw_data_sub_fd, &raw);
+				printf("[px4_sonar_ca_app] Adc Raw :");
+				/*Computation here*/
+				for (unsigned j = 0; j < 12; j++) {
+							printf("%d: %u  ", raw[j].am_channel, raw[j].am_data);
+						}
+				printf("\n");
+
 			}
 			/* there could be more file descriptors here, in the form like:
 			 * if (fds[1..n].revents & POLLIN) {}
 			 */
 		}
 	}
-    warnx("[daemon] px4_base_app exiting\n");
+    warnx("[daemon] px4_sonar_ca_app exiting\n");
     thread_running = false;
 	return 0;
 }
