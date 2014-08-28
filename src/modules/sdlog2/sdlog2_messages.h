@@ -333,13 +333,11 @@ struct log_GS1B_s {
 #define LOG_TECS_MSG 30
 struct log_TECS_s {
 	float altitudeSp;
-	float altitude;
 	float altitudeFiltered;
 	float flightPathAngleSp;
 	float flightPathAngle;
 	float flightPathAngleFiltered;
 	float airspeedSp;
-	float airspeed;
 	float airspeedFiltered;
 	float airspeedDerivativeSp;
 	float airspeedDerivative;
@@ -393,6 +391,20 @@ struct log_TEL_s {
 	uint64_t heartbeat_time;
 };
 
+/* --- VISN - VISION POSITION --- */
+#define LOG_VISN_MSG 38
+struct log_VISN_s {
+	float x;
+	float y;
+	float z;
+	float vx;
+	float vy;
+	float vz;
+	float qx;
+	float qy;
+	float qz;
+	float qw;
+};
 
 /********** SYSTEM MESSAGES, ID > 0x80 **********/
 
@@ -451,11 +463,12 @@ static const struct log_format_s log_formats[] = {
 	LOG_FORMAT(EST1, "ffffffffffffffff",	"s12,s13,s14,s15,s16,s17,s18,s19,s20,s21,s22,s23,s24,s25,s26,s27"),
 	LOG_FORMAT(PWR, "fffBBBBB",		"Periph5V,Servo5V,RSSI,UsbOk,BrickOk,ServoOk,PeriphOC,HipwrOC"),
 	LOG_FORMAT(VICN, "ffffff",		"X,Y,Z,Roll,Pitch,Yaw"),
+	LOG_FORMAT(VISN, "ffffffffff",		"X,Y,Z,VX,VY,VZ,QuatX,QuatY,QuatZ,QuatW"),
 	LOG_FORMAT(GS0A, "BBBBBBBBBBBBBBBB",	"s0,s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15"),
 	LOG_FORMAT(GS0B, "BBBBBBBBBBBBBBBB",	"s0,s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15"),
 	LOG_FORMAT(GS1A, "BBBBBBBBBBBBBBBB",	"s0,s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15"),
 	LOG_FORMAT(GS1B, "BBBBBBBBBBBBBBBB",	"s0,s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15"),
-	LOG_FORMAT(TECS, "fffffffffffffffB",	"ASP,A,AF,FSP,F,FF,AsSP,As,AsF,AsDSP,AsD,TERSP,TER,EDRSP,EDR,M"),
+	LOG_FORMAT(TECS, "fffffffffffffB",	"ASP,AF,FSP,F,FF,AsSP,AsF,AsDSP,AsD,TERSP,TER,EDRSP,EDR,M"),
 	LOG_FORMAT(WIND, "ffff",	"X,Y,CovX,CovY"),
 
 	/* system-level messages, ID >= 0x80 */

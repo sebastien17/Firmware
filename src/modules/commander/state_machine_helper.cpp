@@ -99,11 +99,12 @@ static const char * const state_names[ARMING_STATE_MAX] = {
 };
 
 transition_result_t
-arming_state_transition(struct vehicle_status_s *status,            /// current vehicle status
-			const struct safety_s   *safety,            /// current safety settings
-			arming_state_t          new_arming_state,   /// arming state requested
-			struct actuator_armed_s *armed,             /// current armed status
-			const int               mavlink_fd)         /// mavlink fd for error reporting, 0 for none
+arming_state_transition(struct vehicle_status_s *status,		///< current vehicle status
+			const struct safety_s   *safety,		///< current safety settings
+			arming_state_t          new_arming_state,	///< arming state requested
+			struct actuator_armed_s *armed,			///< current armed status
+			bool			fRunPreArmChecks,	///< true: run the pre-arm checks, false: no pre-arm checks, for unit testing
+			const int               mavlink_fd)		///< mavlink fd for error reporting, 0 for none
 {
 	// Double check that our static arrays are still valid
 	ASSERT(ARMING_STATE_INIT == 0);
@@ -125,7 +126,7 @@ arming_state_transition(struct vehicle_status_s *status,            /// current 
 		int prearm_ret = OK;
 
 		/* only perform the check if we have to */
-		if (new_arming_state == ARMING_STATE_ARMED) {
+		if (fRunPreArmChecks && new_arming_state == ARMING_STATE_ARMED) {
 			prearm_ret = prearm_check(status, mavlink_fd);
 		}
 
@@ -181,12 +182,19 @@ arming_state_transition(struct vehicle_status_s *status,            /// current 
 
 						// Fail transition if power levels on the avionics rail
 						// are measured but are insufficient
-						if (status->condition_power_input_valid && ((status->avionics_power_rail_voltage > 0.0f) &&
-							(status->avionics_power_rail_voltage < 4.9f))) {
-
-							mavlink_log_critical(mavlink_fd, "NOT ARMING: Avionics power low: %6.2f V.", (double)status->avionics_power_rail_voltage);
-							feedback_provided = true;
-							valid_transition = false;
+						if (status->condition_power_input_valid && (status->avionics_power_rail_voltage > 0.0f)) {
+							// Check avionics rail voltages
+							if (status->avionics_power_rail_voltage < 4.75f) {
+								mavlink_log_critical(mavlink_fd, "NOT ARMING: Avionics power low: %6.2f Volt", (double)status->avionics_power_rail_voltage);
+								feedback_provided = true;
+								valid_transition = false;
+							} else if (status->avionics_power_rail_voltage < 4.9f) {
+								mavlink_log_critical(mavlink_fd, "CAUTION: Avionics power low: %6.2f Volt", (double)status->avionics_power_rail_voltage);
+								feedback_provided = true;
+							} else if (status->avionics_power_rail_voltage > 5.4f) {
+								mavlink_log_critical(mavlink_fd, "CAUTION: Avionics power high: %6.2f Volt", (double)status->avionics_power_rail_voltage);
+								feedback_provided = true;
+							}
 						}
 					}
 
