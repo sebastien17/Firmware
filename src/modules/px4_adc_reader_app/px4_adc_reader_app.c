@@ -37,30 +37,29 @@
  * Daemon application example for PX4 autopilot
  */
 
-#include <nuttx/config.h>
+#include <nuttx/config.h>//
 #include <nuttx/sched.h>
 #include <nuttx/arch.h>
-#include <nuttx/spi.h>
-#include <nuttx/analog/adc.h>
+//#include <nuttx/spi.h>
+//#include <nuttx/analog/adc.h>
 
 #include <sys/types.h>
 
-#include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <poll.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <debug.h>
+#include <unistd.h>//
+#include <stdio.h>//
+#include <stdlib.h>//
+#include <string.h>//
+#include <poll.h>//
+#include <fcntl.h>//
+#include <errno.h>//
 
-#include <uORB/uORB.h>
-#include <uORB/topics/adc_raw_data.h>
+#include <uORB/uORB.h>//
+#include <uORB/topics/adc_raw_data.h>//
 
-#include <drivers/drv_adc.h>
+#include <drivers/drv_adc.h>//
 
-#include <systemlib/systemlib.h>
-#include <systemlib/err.h>
+#include <systemlib/systemlib.h>//
+#include <systemlib/err.h>//
 
 
 
@@ -93,11 +92,11 @@ int px4_adc_reader_app_main(int argc, char *argv[])
 
 		thread_should_exit = false;
 		daemon_task = task_spawn_cmd("daemon",
-					     SCHED_RR,
-					     SCHED_PRIORITY_DEFAULT,
-					     4096,
-					     px4_adc_reader_app_thread,
-					     (argv) ? (const char **)&argv[2] : (const char **)NULL);
+						 SCHED_DEFAULT,
+						 SCHED_PRIORITY_MAX - 5,
+						 2000,
+					     &px4_adc_reader_app_thread,
+					     nullptr);
 		thread_running = true;
 		exit(0);
 	}

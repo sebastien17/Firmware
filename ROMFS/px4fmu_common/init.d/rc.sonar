@@ -1,0 +1,6 @@
+#!nsh
+#
+# Application for sonar
+#
+#
+px4_adc_reader_app start
