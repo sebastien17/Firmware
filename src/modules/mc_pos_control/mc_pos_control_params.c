@@ -222,78 +222,37 @@ PARAM_DEFINE_FLOAT(MPC_LAND_SPEED, 1.0f);
  * @group Sonar
  */
 PARAM_DEFINE_INT32(SNR_ACTIVATE_SW, 0);
+
 /**
- * Lateral Meaningful Threshold
- * (meaningful th of the left sonar, 1ft 80 = 0 80 per ft)
+ * Forward Meaningful Minimum Signal Threshold
+ * (...)
  * @unit none
  * @min 0
- * @max 1500
+ * @max 2500
  * @group Sonar
  */
-PARAM_DEFINE_INT32(SNR_LAT_M_TH, 100);
+PARAM_DEFINE_INT32(SNR_FWD_MIN_TH, 80);
+
 /**
- * Lateral Short Threshold
- *(very close on the left sonar 3ft=380 4.5 570)
+ * Forward Significant Signal Threshold
+ *(...)
  * @unit none
  * @min 0
- * @max 1500
+ * @max 2500
  * @group Sonar
  */
-PARAM_DEFINE_INT32(SNR_LAT_S_TH, 570);
+PARAM_DEFINE_FLOAT(SNR_FWD_SIG_RATIO, 0.5f);
+
 /**
- * Lateral Long Threshold
- *(close on the left sonar, 6ft=760)
+ * Forward Meaningful MAximum Signal Threshold
+ *(...)
  * @unit none
  * @min 0
- * @max 1500
+ * @max 2500
  * @group Sonar
  */
-PARAM_DEFINE_INT32(SNR_LAT_L_TH, 760);
-/**
- * Forward Meaningful Threshold
- * (meaningful th of the forward sonar, 1ft 30 = 0 40 per ft)
- * @unit none
- * @min 0
- * @max 1500
- * @group Sonar
- */
-PARAM_DEFINE_INT32(SNR_FWD_M_TH, 270);
-/**
- * Forward Short Threshold
- *(very close on the forward sonar,5ft = 270 7 350)
- * @unit none
- * @min 0
- * @max 1500
- * @group Sonar
- */
-PARAM_DEFINE_INT32(SNR_FWD_S_TH, 390);
-/**
- * Forward Long Threshold
- *(close on the forward sonar, 8ft=390)
- * @unit none
- * @min 0
- * @max 1500
- * @group Sonar
- */
-PARAM_DEFINE_INT32(SNR_FWD_L_TH, 760);
-/**
- * ADC Left Sonar Index
- *(index to identify the left sonar signal in an adc_raw_data_s struct)
- * @unit none
- * @min 0
- * @max 11
- * @group Sonar
- */
-PARAM_DEFINE_INT32(SNR_LEFT_ADC_IND, 6); // adc channel 13
-/**
- * ADC Right Sonar Index
- *(index to identify the right sonar signal in an adc_raw_data_s struct)
- * @unit none
- * @min 0
- * @max 11
- * @group Sonar
- */
-PARAM_DEFINE_INT32(SNR_RIGHT_ADC_IND, 7); // adc channel 14
+PARAM_DEFINE_INT32(SNR_FWD_MAX_TH, 2500);
+
 /**
  * ADC Fwd Sonar Index
  *(index to identify the fwd sonar signal in an adc_raw_data_s struct)
@@ -302,41 +261,5 @@ PARAM_DEFINE_INT32(SNR_RIGHT_ADC_IND, 7); // adc channel 14
  * @max 11
  * @group Sonar
  */
-PARAM_DEFINE_INT32(SNR_FWD_ADC_IND, 8); // adc channel 15
-/**
- * Sonar Correction
- *(TODO)
- * @unit rad
- * @min 0
- * @max TODO
- * @group Sonar
- */
-PARAM_DEFINE_FLOAT(SNR_CORR_STEP_SIZE, 0.15f);
-/**
- * Sonar Small Correction
- *(TODO)
- * @unit rad
- * @min 0
- * @max TODO
- * @group Sonar
- */
-PARAM_DEFINE_FLOAT(SNR_CORR_SML_STEP_SIZE, 0.05f);
-/**
- * Sonar Fwd Correction
- *(TODO)
- * @unit TODO
- * @min 0
- * @max TODO
- * @group Sonar
- */
-PARAM_DEFINE_FLOAT(SNR_CORR_FWD_STEP_SIZE, 0.2f);
+PARAM_DEFINE_INT32(SNR_FWD_ADC_IND, 7); // adc channel 14
 
-/**
- * Sonar Stuck Threshold
- *(TODO)
- * @unit TODO
- * @min 0
- * @max TODO
- * @group Sonar
- */
-PARAM_DEFINE_INT32(SNR_STUCK_TH, 30);

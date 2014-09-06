@@ -55,6 +55,7 @@
 #include <drivers/drv_hrt.h>
 #include <arch/board/board.h>
 #include <uORB/uORB.h>
+#include <uORB/topics/debug_key_value.h> //sl
 #include <uORB/topics/vehicle_attitude_setpoint.h>
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/actuator_controls.h>
@@ -127,6 +128,8 @@ private:
 	orb_advert_t	_att_sp_pub;			/**< attitude setpoint publication */
 	orb_advert_t	_local_pos_sp_pub;		/**< vehicle local position setpoint publication */
 	orb_advert_t	_global_vel_sp_pub;		/**< vehicle global velocity setpoint publication */
+	orb_advert_t 	_debug_pub;				/**< Debug orb pub */
+
 
 	struct vehicle_attitude_s			_att;						/**< vehicle attitude */
 	struct vehicle_attitude_setpoint_s		_att_sp;				/**< vehicle attitude setpoint */
@@ -138,6 +141,7 @@ private:
 	struct vehicle_local_position_setpoint_s	_local_pos_sp;		/**< vehicle local position setpoint */
 	struct vehicle_global_velocity_setpoint_s	_global_vel_sp;		/**< vehicle global velocity setpoint */
 	adc_raw_data_s _adc_raw_data;									/**< adc raw data */ //sl
+	struct debug_key_value_s _debug; 								/**< _debug structure */ //sl
 
 
 	struct {
@@ -162,36 +166,19 @@ private:
 
 	struct {
 		param_t _snr_activate_sw_h;
-		param_t _snr_lat_m_th_h;
-		param_t _snr_lat_s_th_h;
-		param_t _snr_lat_l_th_h;
-		param_t _snr_fwd_m_th_h;
-		param_t _snr_fwd_s_th_h;
-		param_t _snr_fwd_l_th_h;
-		param_t _snr_left_adc_ind_h;
-		param_t _snr_right_adc_ind_h;
+		param_t _snr_fwd_min_th_h;
+		param_t _snr_fwd_sig_ratio_h;
+		param_t _snr_fwd_max_th_h;
 		param_t _snr_fwd_adc_ind_h;
-		param_t _snr_corr_step_size_h;
-		param_t _snr_corr_sml_step_size_h;
-		param_t _snr_corr_fwd_step_size_h;
-		param_t _snr_stuck_th_h;
+
 	}		_sonar_params_handles;		/*Handles for sonar parameters */
 
 	struct {
 		int _snr_activate_sw;
-		int _snr_lat_m_th;
-		int _snr_lat_s_th;
-		int _snr_lat_l_th;
-		int _snr_fwd_m_th;
-		int _snr_fwd_s_th;
-		int _snr_fwd_l_th;
-		int _snr_left_adc_ind;
-		int _snr_right_adc_ind;
+		int _snr_fwd_min_th;
+		float _snr_fwd_sig_ratio;
+		int _snr_fwd_max_th;
 		int _snr_fwd_adc_ind;
-		float _snr_corr_step_size;
-		float _snr_corr_sml_step_size;
-		float _snr_corr_fwd_step_size;
-		int _snr_stuck_th;
 	}		_sonar_params;		/* Sonar parameters */
 
 	struct {
@@ -228,18 +215,7 @@ private:
 	/*
 	 * Sonar declarations
 	 */
-	int 	_leftSonar;
-	int 	_rightSonar;
 	int 	_forwardSonar;
-	math::Vector<3> _pos_spCorrBody;
-	math::Vector<3> _pos_spCorrNED;
-	float   _yawCorr;
-
-	math::Vector<3> lastCorrBody;
-	int turnCount = 0;
-	int stuckCount = 0;
-	int stuckDir = 0;
-	bool forwardClear;
 
 
 	/**
@@ -301,7 +277,9 @@ private:
 	/*
 	 * Sonar override functions
 	 */
-	void sonar_pos_override(float dt);
+	math::Vector<3> sonar_vel_override(float dt);
+
+
 };
 
 namespace pos_control
@@ -338,6 +316,7 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_att_sp_pub(-1),
 	_local_pos_sp_pub(-1),
 	_global_vel_sp_pub(-1),
+	_debug_pub(-1), //sl
 
 	_ref_alt(0.0f),
 	_ref_timestamp(0),
@@ -355,6 +334,7 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	memset(&_local_pos_sp, 0, sizeof(_local_pos_sp));
 	memset(&_global_vel_sp, 0, sizeof(_global_vel_sp));
 	memset(&_adc_raw_data, 0, sizeof(_adc_raw_data));//sl
+	memset(&_debug, 0, sizeof(_debug));//sl
 
 
 	memset(&_ref_pos, 0, sizeof(_ref_pos));
@@ -374,18 +354,6 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_vel_prev.zero();
 	_vel_ff.zero();
 	_sp_move_rate.zero();
-
-	/*
-	 * Sonar initialization
-	 */
-	_pos_spCorrBody.zero();//move of body frame
-	_pos_spCorrNED.zero();//move in ned
-	_yawCorr=0;//rotation
-	stuckDir = 0;
-	turnCount = 0;
-	stuckCount = 0;
-	forwardClear = false;
-
 
 	_params_handles.thr_min		= param_find("MPC_THR_MIN");
 	_params_handles.thr_max		= param_find("MPC_THR_MAX");
@@ -408,19 +376,11 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	/*Sonar handles initialization */
 
 	_sonar_params_handles._snr_activate_sw_h = param_find("SNR_ACTIVATE_SW");
-	_sonar_params_handles._snr_lat_m_th_h = param_find("SNR_LAT_M_TH");
-	_sonar_params_handles._snr_lat_s_th_h = param_find("SNR_LAT_S_TH");
-	_sonar_params_handles._snr_lat_l_th_h = param_find("SNR_LAT_L_TH");
-	_sonar_params_handles._snr_fwd_m_th_h = param_find("SNR_FWD_M_TH");
-	_sonar_params_handles._snr_fwd_s_th_h = param_find("SNR_FWD_S_TH");
-	_sonar_params_handles._snr_fwd_l_th_h = param_find("SNR_FWD_L_TH");
-	_sonar_params_handles._snr_left_adc_ind_h = param_find("SNR_LEFT_ADC_IND");
-	_sonar_params_handles._snr_right_adc_ind_h = param_find("SNR_RIGHT_ADC_IND");
+	_sonar_params_handles._snr_fwd_min_th_h = param_find("SNR_FWD_MIN_TH");
+	_sonar_params_handles._snr_fwd_sig_ratio_h = param_find("SNR_FWD_SIG_RATIO");
+	_sonar_params_handles._snr_fwd_max_th_h = param_find("SNR_FWD_MAX_TH");
 	_sonar_params_handles._snr_fwd_adc_ind_h = param_find("SNR_FWD_ADC_IND");
-	_sonar_params_handles._snr_corr_step_size_h = param_find("SNR_CORR_STEP_SIZE");
-	_sonar_params_handles._snr_corr_sml_step_size_h = param_find("SNR_CORR_SML_STEP_SIZE");
-	_sonar_params_handles._snr_corr_fwd_step_size_h = param_find("SNR_CORR_FWD_STEP_SIZE");
-	_sonar_params_handles._snr_stuck_th_h = param_find("SNR_STUCK_TH");
+
 
 	/* fetch initial parameter values */
 	parameters_update(true);
@@ -509,19 +469,11 @@ MulticopterPositionControl::parameters_update(bool force)
 
 		/* Update of sonar parameters */
 		param_get(_sonar_params_handles._snr_activate_sw_h,&_sonar_params._snr_activate_sw);
-		param_get(_sonar_params_handles._snr_lat_m_th_h,&_sonar_params._snr_lat_m_th);
-		param_get(_sonar_params_handles._snr_lat_s_th_h,&_sonar_params._snr_lat_s_th);
-		param_get(_sonar_params_handles._snr_lat_l_th_h,&_sonar_params._snr_lat_l_th);
-		param_get(_sonar_params_handles._snr_fwd_m_th_h,&_sonar_params._snr_fwd_m_th);
-		param_get(_sonar_params_handles._snr_fwd_s_th_h,&_sonar_params._snr_fwd_s_th);
-		param_get(_sonar_params_handles._snr_fwd_l_th_h,&_sonar_params._snr_fwd_l_th);
-		param_get(_sonar_params_handles._snr_left_adc_ind_h,&_sonar_params._snr_left_adc_ind);
-		param_get(_sonar_params_handles._snr_right_adc_ind_h,&_sonar_params._snr_right_adc_ind);
+		param_get(_sonar_params_handles._snr_activate_sw_h,&_sonar_params._snr_fwd_min_th);
+		param_get(_sonar_params_handles._snr_fwd_sig_ratio_h,&_sonar_params._snr_fwd_sig_ratio);
+		param_get(_sonar_params_handles._snr_fwd_max_th_h,&_sonar_params._snr_fwd_max_th);
 		param_get(_sonar_params_handles._snr_fwd_adc_ind_h,&_sonar_params._snr_fwd_adc_ind);
-		param_get(_sonar_params_handles._snr_corr_step_size_h,&_sonar_params._snr_corr_step_size);
-		param_get(_sonar_params_handles._snr_corr_sml_step_size_h,&_sonar_params._snr_corr_sml_step_size);
-		param_get(_sonar_params_handles._snr_corr_fwd_step_size_h,&_sonar_params._snr_corr_fwd_step_size);
-		param_get(_sonar_params_handles._snr_stuck_th_h , &_sonar_params._snr_stuck_th);
+
 	}
 
 	return OK;
@@ -756,122 +708,45 @@ MulticopterPositionControl::control_offboard(float dt)
 }
 
 /* Sonar override function */ // sl
-void
-MulticopterPositionControl::sonar_pos_override(float dt)
+math::Vector<3>
+MulticopterPositionControl::sonar_vel_override(float dt)
 {
+
 	/*Declaration*/
-	bool updated;
+	bool _updated;
+	math::Vector<3> _corr_vel;
+	const char debug_name[] = "ADC_14";
+
+	/*Initialization*/
+	_corr_vel.zero();
 
 
 	/*Poll Check */
-	orb_check(_adc_raw_data_sub, &updated);
+	orb_check(_adc_raw_data_sub, &_updated);
 
-	if (updated) {
+	if (_updated) {
 		orb_copy(ORB_ID(adc_raw_data), _adc_raw_data_sub, &_adc_raw_data);
 	}
 
 	/* Retrieving sonar data */
-	_leftSonar = _adc_raw_data[_sonar_params._snr_left_adc_ind].am_data;
-	_rightSonar = _adc_raw_data[_sonar_params._snr_right_adc_ind].am_data;
+
 	_forwardSonar = _adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_data;
 
 
-	/****************************************************************************************************************/
+	memcpy(&_debug.key, &debug_name, strlen(debug_name)+1 );
 
-		lastCorrBody.zero();//move of body frame in rad now
-		if (turnCount<20) turnCount++;// if counter enabled , count up
-		if ((_forwardSonar<_sonar_params._snr_fwd_s_th)&&(_forwardSonar>_sonar_params._snr_fwd_m_th))
-		{
-			forwardClear = false;//not clear to go
-			lastCorrBody(0)=-_sonar_params._snr_corr_sml_step_size;//back
+	_debug.value = _forwardSonar;
 
-			if (_leftSonar>_sonar_params._snr_lat_s_th) {//left clear, go left
-				lastCorrBody(1)=-_sonar_params._snr_corr_step_size;//left
-				stuckCount++;//we are stuck
-			}
-			else if(_rightSonar>_sonar_params._snr_lat_s_th){//right clear, go right
-				lastCorrBody(1)=_sonar_params._snr_corr_step_size;//right
-				stuckCount++;//we are stuck
-			}
-			else {//no way but back
-				stuckCount=stuckCount+10;//we are really stuck, get out sooner
-			}
-		}
-		else{
+	if (_debug_pub > 0)
+	{
+		orb_publish(ORB_ID(debug_key_value), _debug_pub, &_debug);
+	}
+	else
+	{
+		_debug_pub = orb_advertise(ORB_ID(debug_key_value), &_debug);
+	}
 
-			forwardClear = true;
-			//too close to sides
-		  if ((_leftSonar<_sonar_params._snr_lat_s_th)&&(_leftSonar>_sonar_params._snr_lat_m_th)&&(_rightSonar>_sonar_params._snr_lat_s_th)){
-
-			forwardClear = false;
-			lastCorrBody(1)=_sonar_params._snr_corr_sml_step_size;//too close to left, go right
-		  }else {
-			  if ((stuckDir>0)&&(_leftSonar>_sonar_params._snr_lat_l_th)&&(turnCount>10))	{
-				  _yawCorr=-1.5708;//we turned right last time, safe to go left
-				  stuckDir--;
-				  turnCount=100;//disable counter
-			  }
-		  }
-		  if ((_rightSonar<_sonar_params._snr_lat_s_th)&&(_rightSonar>_sonar_params._snr_lat_m_th)&&(_leftSonar>_sonar_params._snr_lat_s_th)){
-			forwardClear = false;
-			lastCorrBody(1)=_sonar_params._snr_corr_sml_step_size;//too close to right, go left
-
-		  }else {
-			  if ((stuckDir<0)&&(_rightSonar>_sonar_params._snr_lat_l_th)&&(turnCount>10))	{
-				  _yawCorr=1.5708;//we turned left last time, safe to go right
-				  stuckDir++;
-				  turnCount=100;//disable counter
-			  }
-		  }
-		}
-		if (stuckCount > _sonar_params._snr_stuck_th ) {
-			//if we have been stuck for a while, true to rotate and get out
-			if (_rightSonar>_leftSonar){
-				_yawCorr=1.5708;//turn right 90 deg
-				stuckDir++;
-			}else{
-				_yawCorr=-1.5708;//turn left 90 deg
-				stuckDir--;
-			}
-			turnCount=0;//enable counter
-
-			stuckCount=0;
-		}
-		for (int i = 0; i < 2; i++) {
-		//_att.R is ned to body, use the transposed version
-			_pos_spCorrBody(i) = _att.R[i][0] * lastCorrBody(0) + _att.R[i][1] * lastCorrBody(1) + _att.R[i][2] * lastCorrBody(2);
-		}
-		//emergency op, will take effect directly at attitude control
-		_pos_sp(0)=_pos_sp(0)+_pos_spCorrBody(0)+_pos_spCorrBody(0)+_pos_spCorrBody(0);//also correct set point north
-		_pos_sp(1)=_pos_sp(1)+_pos_spCorrBody(1)+_pos_spCorrBody(1)+_pos_spCorrBody(1)+_pos_spCorrBody(1);//also correct set point east
-		_att_sp.yaw_body=_att_sp.yaw_body+_yawCorr;//rotate
-
-
-
-		lastCorrBody.zero();//move in sp in m now
-		_pos_spCorrNED.zero();//move in ned
-
-		if (forwardClear&&_control_mode.flag_control_position_enabled) {
-			//control set point
-			lastCorrBody(0)=_sonar_params._snr_corr_fwd_step_size;//forward slowly when using sonar and clear and in position control
-
-			for(int i = 0; i < 2; i++) {
-			//_att.R is ned to body, use the transposed version
-				_pos_spCorrNED(i) = _att.R[i][0] * lastCorrBody(0) + _att.R[i][1] * lastCorrBody(1) + _att.R[i][2] * lastCorrBody(2);
-
-			}
-
-			//printf("[mpc] initial sp pos sp (x,y,z) yaw : %.2f, %.2f, %.2f %.2f",(double)_pos_sp(0), (double)_pos_sp(1), (double)_pos_sp(2), (double)_att_sp.yaw_body);
-			_pos_sp(0)=_pos_sp(0)+_pos_spCorrNED(0);//correct set point north
-			_pos_sp(1)=_pos_sp(1)+_pos_spCorrNED(1);//correct set point east
-			//not an emergency, allow control
-		}
-
-		_control_mode.flag_control_velocity_enabled=true;//allow velocity control
-
-
-	/****************************************************************************************************************/
-
+	return _corr_vel;
 }
 
 
@@ -896,7 +771,7 @@ MulticopterPositionControl::task_main()
 	_pos_sp_triplet_sub = orb_subscribe(ORB_ID(position_setpoint_triplet));
 	_local_pos_sp_sub = orb_subscribe(ORB_ID(vehicle_local_position_setpoint));
 	_global_vel_sp_sub = orb_subscribe(ORB_ID(vehicle_global_velocity_setpoint));
-
+	_adc_raw_data_sub = orb_subscribe(ORB_ID(adc_raw_data));
 
 	parameters_update(true);
 
@@ -1015,12 +890,6 @@ MulticopterPositionControl::task_main()
 				}
 			}
 
-			/* Sonar activation if activated */ 	//sl
-			if(_sonar_params._snr_activate_sw != 0)
-			{
-				sonar_pos_override(dt); /* Sonar poistion override function*/
-			}
-
 			/* fill local position setpoint */
 			_local_pos_sp.timestamp = hrt_absolute_time();
 			_local_pos_sp.x = _pos_sp(0);
@@ -1080,6 +949,11 @@ MulticopterPositionControl::task_main()
 					_vel_sp(2) = _params.land_speed;
 				}
 
+				/* Sonar activation if activated */ 	//sl
+				if(_sonar_params._snr_activate_sw != 0)
+				{
+					_vel_sp = sonar_vel_override(dt); /* Sonar velocity override function*/
+				}
 
 				if (!_control_mode.flag_control_manual_enabled) {
 					/* limit 3D speed only in non-manual modes */
@@ -1137,6 +1011,7 @@ MulticopterPositionControl::task_main()
 					} else {
 						reset_int_xy = true;
 					}
+
 
 					/* velocity error */
 					math::Vector<3> vel_err = _vel_sp - _vel;
@@ -1281,24 +1156,6 @@ MulticopterPositionControl::task_main()
 						math::Vector<3> body_x;
 						math::Vector<3> body_y;
 						math::Vector<3> body_z;
-
-						/* Sonar activation if activated */ 	//sl
-						if(_sonar_params._snr_activate_sw != 0)
-						{
-							thrust_abs = thrust_sp.length();
-							if (forwardClear) {
-							//	thrust_sp(0)=thrust_sp(0)+_pos_spCorrBody(0)*thrust_abs;
-							//thrust_sp(1)=thrust_sp(1)+_pos_spCorrBody(1)*thrust_abs;
-							}
-							else{
-								//thrust_sp(0)=_pos_spCorrBody(0)*thrust_abs;
-								//thrust_sp(1)=_pos_spCorrBody(1)*thrust_abs;
-								thrust_sp(0)=thrust_sp(0)+_pos_spCorrBody(0)*thrust_abs;
-								thrust_sp(1)=thrust_sp(1)+_pos_spCorrBody(1)*thrust_abs;
-
-							}
-							thrust_abs = thrust_sp.length();
-						}
 
 						if (thrust_abs > SIGMA) {
 							body_z = -thrust_sp / thrust_abs;
