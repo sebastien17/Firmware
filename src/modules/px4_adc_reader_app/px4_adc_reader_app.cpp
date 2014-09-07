@@ -58,7 +58,7 @@
 #include <systemlib/systemlib.h>
 #include <systemlib/err.h>
 
-#define MEAN_NB_VALUE 20
+#define BLE_FACTOR 0.2
 
 /**
  * Multicopter attitude control app start / stop handling function
@@ -66,6 +66,73 @@
  * @ingroup apps
  */
 extern "C" __EXPORT int px4_adc_reader_app_main(int argc, char *argv[]);
+
+class BrownSimpleExpo
+{
+    public:
+        BrownSimpleExpo()
+        {
+        	alpha = 0.5;
+        	smoothed = 0.0;
+        }
+        BrownSimpleExpo(double f)
+        {
+        	alpha = f;
+        	smoothed = 0.0;
+        }
+
+        void set_factor(float factor)
+        {
+        	alpha = factor;
+        }
+        void step(double measurement)
+        {
+            smoothed = alpha * measurement + (1 - alpha) * smoothed;
+        }
+
+        double get(){ return smoothed; }
+
+    private:
+        double smoothed;
+        double alpha;
+};
+
+class BrownLinearExpo
+{
+    public:
+        BrownLinearExpo()
+        {
+        	estimate = 0.0;
+        	double_smoothed = 0.0;
+        	single_smoothed = 0.0;
+        	a = 0.5;
+        }
+        BrownLinearExpo(double f)
+        {
+        	a = f;
+        	estimate = 0.0;
+        	double_smoothed = 0.0;
+        	single_smoothed = 0.0;
+        }
+        void set_factor(float factor) { a = factor; }
+        void step(double measurement)
+        {
+            single_smoothed = a * measurement + (1 - a) * single_smoothed;
+            double_smoothed = a * single_smoothed + (1 - a) * double_smoothed;
+            double est_a = (2*single_smoothed - double_smoothed);
+            double est_b = (a / (1-a) )*(single_smoothed - double_smoothed);
+            estimate = est_a + est_b;
+        }
+        double get()
+        {
+        	return estimate;
+        }
+
+    private:
+        double estimate, double_smoothed, single_smoothed;
+        double a;
+ };
+
 
 class Px4_adc_reader
 {
@@ -94,9 +161,7 @@ private:
 	orb_advert_t _adc_raw_data_t_h; 				/* file handle that will be used for publishing */
 	struct adc_msg_s _adc_data[12];       				/* make space for a maximum of twelve channels */
 	adc_raw_data_s _adc_data_m;       			/* Structure with additional info as mean value or validity make space for a maximum of twelve channels */
-	int32_t _mean_array[12][MEAN_NB_VALUE + 1];
-	int32_t _stored_mean[12];
-	int _mean_array_index;
+
 
 	/**
 	 * Shim for calling task_main from task_create.
@@ -132,14 +197,10 @@ Px4_adc_reader::Px4_adc_reader():
 	_task_should_exit(false),
 	_control_task(-1),
 	_fd(-1),
-	_adc_raw_data_t_h(-1),
-	_mean_array_index(0)
+	_adc_raw_data_t_h(-1)
 {
 	memset(&_adc_data, 0, sizeof(_adc_data));
 	memset(&_adc_data_m, 0, sizeof(_adc_data_m));
-	memset(&_mean_array, 0, sizeof(_mean_array));
-	memset(&_stored_mean, 0, sizeof(_stored_mean));
-
 }
 
 
@@ -207,6 +268,12 @@ Px4_adc_reader::task_main()
 		warnx("ERROR: can't open ADC device");
 		_exit(0);
 		}
+	BrownLinearExpo _ble[12];
+	for(int i; i<11; i++)
+	{
+		_ble[i].set_factor(BLE_FACTOR);
+	}
+
 	while (!_task_should_exit)
 	{
 		/*Main Loop */
@@ -221,20 +288,13 @@ Px4_adc_reader::task_main()
 
 		for(int i=0; i<=11;i++)
 		{
-			/*
-			 * Mean algorithm
-			 * Warning the first MEAN_NB_VALUE are not valid
-			 */
-
-			_mean_array[i][_mean_array_index] =  _adc_data[i].am_data;
-			_stored_mean[i] += (_mean_array[i][_mean_array_index]-_mean_array[i][(_mean_array_index+1) % (MEAN_NB_VALUE + 1)])/MEAN_NB_VALUE;
-
+			/* Brow Linear Expo Low Pass Filter */
+			_ble[i].step((double)_adc_data[i].am_data);
 			/* ADC Data structure filling */
 			_adc_data_m[i].am_channel = _adc_data[i].am_channel;
 			_adc_data_m[i].am_data = _adc_data[i].am_data;
-			_adc_data_m[i].am_mean_value = _stored_mean[i];
+			_adc_data_m[i].am_mean_value = (int32_t)_ble[i].get();
 		}
-		_mean_array_index = (_mean_array_index+1) % (MEAN_NB_VALUE + 1); /* Update of the index for mean array */
 
 		/* Data publication */
 		if (_adc_raw_data_t_h > 0) {
@@ -242,7 +302,7 @@ Px4_adc_reader::task_main()
 		} else {
 			_adc_raw_data_t_h = orb_advertise(ORB_ID(adc_raw_data), &_adc_data_m); /* Publish data with additional info for the first time */
 		}
-		usleep(50000); /* 20 Hz update rate */
+		usleep(100000); /* 10 Hz update rate */
 	}
 	warnx("[daemon] px4_adc_reader_app exiting\n");
 	_control_task = -1;
