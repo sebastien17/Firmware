@@ -58,6 +58,8 @@
 #include <systemlib/systemlib.h>
 #include <systemlib/err.h>
 
+#define MEAN_NB_VALUE 20
+
 /**
  * Multicopter attitude control app start / stop handling function
  *
@@ -90,7 +92,12 @@ private:
 	int		_control_task;			/**< task handle for sensor task */
 	int 	_fd;						/*file descriptor*/
 	orb_advert_t _adc_raw_data_t_h; 				/* file handle that will be used for publishing */
-	adc_raw_data_s _adc_data;       				/* make space for a maximum of twelve channels */
+	struct adc_msg_s _adc_data[12];       				/* make space for a maximum of twelve channels */
+	adc_raw_data_s _adc_data_m;       			/* Structure with additional info as mean value or validity make space for a maximum of twelve channels */
+	int32_t _mean_array[12][MEAN_NB_VALUE + 1];
+	int32_t _stored_mean[12];
+	int _mean_array_index;
+
 	/**
 	 * Shim for calling task_main from task_create.
 	 */
@@ -125,9 +132,14 @@ Px4_adc_reader::Px4_adc_reader():
 	_task_should_exit(false),
 	_control_task(-1),
 	_fd(-1),
-	_adc_raw_data_t_h(-1)
+	_adc_raw_data_t_h(-1),
+	_mean_array_index(0)
 {
 	memset(&_adc_data, 0, sizeof(_adc_data));
+	memset(&_adc_data_m, 0, sizeof(_adc_data_m));
+	memset(&_mean_array, 0, sizeof(_mean_array));
+	memset(&_stored_mean, 0, sizeof(_stored_mean));
+
 }
 
 
@@ -205,11 +217,30 @@ Px4_adc_reader::task_main()
 			warnx("[daemon] px4_adc_reader_app : error reading adc device\n");
 			_exit(0);
 		}
-		/* publish local position setpoint */
+		/* Data treatment */
+
+		for(int i=0; i<=11;i++)
+		{
+			/*
+			 * Mean algorithm
+			 * Warning the first MEAN_NB_VALUE are not valid
+			 */
+
+			_mean_array[i][_mean_array_index] =  _adc_data[i].am_data;
+			_stored_mean[i] += (_mean_array[i][_mean_array_index]-_mean_array[i][(_mean_array_index+1) % (MEAN_NB_VALUE + 1)])/MEAN_NB_VALUE;
+
+			/* ADC Data structure filling */
+			_adc_data_m[i].am_channel = _adc_data[i].am_channel;
+			_adc_data_m[i].am_data = _adc_data[i].am_data;
+			_adc_data_m[i].am_mean_value = _stored_mean[i];
+		}
+		_mean_array_index = (_mean_array_index+1) % (MEAN_NB_VALUE + 1); /* Update of the index for mean array */
+
+		/* Data publication */
 		if (_adc_raw_data_t_h > 0) {
-			orb_publish(ORB_ID(adc_raw_data), _adc_raw_data_t_h, &_adc_data);
+			orb_publish(ORB_ID(adc_raw_data), _adc_raw_data_t_h, &_adc_data_m); /* Publish data with additional info */
 		} else {
-			_adc_raw_data_t_h = orb_advertise(ORB_ID(adc_raw_data), &_adc_data);
+			_adc_raw_data_t_h = orb_advertise(ORB_ID(adc_raw_data), &_adc_data_m); /* Publish data with additional info for the first time */
 		}
 		usleep(50000); /* 20 Hz update rate */
 	}

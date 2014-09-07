@@ -216,6 +216,7 @@ private:
 	 * Sonar declarations
 	 */
 	int 	_forwardSonar;
+	bool debug_s;
 
 
 	/**
@@ -300,6 +301,7 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_control_task(-1),
 	_mavlink_fd(-1),
 
+
 /* subscriptions */
 	_att_sub(-1),
 	_att_sp_sub(-1),
@@ -324,6 +326,8 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_reset_pos_sp(true),
 	_reset_alt_sp(true)
 {
+	debug_s = false;
+
 	memset(&_att, 0, sizeof(_att));
 	memset(&_att_sp, 0, sizeof(_att_sp));
 	memset(&_manual, 0, sizeof(_manual));
@@ -715,7 +719,9 @@ MulticopterPositionControl::sonar_vel_override(float dt)
 	/*Declaration*/
 	bool _updated;
 	math::Vector<3> _corr_vel;
-	const char debug_name[] = "ADC_14";
+	char debug_name_data[] = "ADC_data";
+	char debug_name_mean[] = "ADC_mean";
+
 
 	/*Initialization*/
 	_corr_vel.zero();
@@ -730,12 +736,19 @@ MulticopterPositionControl::sonar_vel_override(float dt)
 
 	/* Retrieving sonar data */
 
-	_forwardSonar = _adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_data;
+	_forwardSonar = _adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value;
 
-
-	memcpy(&_debug.key, &debug_name, strlen(debug_name)+1 );
-
-	_debug.value = _forwardSonar;
+	if(debug_s)
+	{
+		memcpy(&_debug.key, &debug_name_data, strlen(debug_name_data)+1 );
+		_debug.value = _adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_data;
+	}
+	else
+	{
+		memcpy(&_debug.key, &debug_name_mean, strlen(debug_name_mean)+1 );
+		_debug.value = _adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value;
+	}
+	debug_s = !debug_s;
 
 	if (_debug_pub > 0)
 	{

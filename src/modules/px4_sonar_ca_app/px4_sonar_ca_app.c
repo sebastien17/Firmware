@@ -145,10 +145,10 @@ int px4_sonar_ca_app_thread(int argc, char *argv[])
 				adc_raw_data_s raw;
 				/* copy adc raw data into local buffer */
 				orb_copy(ORB_ID(adc_raw_data), adc_raw_data_sub_fd, &raw);
-				printf("[px4_sonar_ca_app] Adc Raw :");
+				printf("[sca] Adc Raw: ");
 				/*Computation here*/
 				for (unsigned j = 0; j < 12; j++) {
-							printf("%d: %u  ", raw[j].am_channel, raw[j].am_data);
+							printf("%d: %u(%u) ", raw[j].am_channel, raw[j].am_data, raw[j].am_mean_value);
 						}
 				printf("\n");
 
