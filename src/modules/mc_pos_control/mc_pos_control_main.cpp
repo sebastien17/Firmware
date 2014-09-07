@@ -79,8 +79,6 @@
 #define TILT_COS_MAX	0.7f
 #define SIGMA			0.000001f
 
-#define DEBUG_SL
-
 /**
  * Multicopter position control app start / stop handling function
  *
@@ -217,7 +215,7 @@ private:
 	/*
 	 * Sonar declarations
 	 */
-	float 	_forwardSonar;
+	int 	_forwardSonar;
 	bool debug_s;
 
 
@@ -280,8 +278,7 @@ private:
 	/*
 	 * Sonar override functions
 	 */
-	math::Vector<3> sonar_override(float dt);
-	float ratio (int32_t value,int32_t min ,int32_t max );
+	math::Vector<3> sonar_vel_override(float dt);
 
 
 };
@@ -476,7 +473,7 @@ MulticopterPositionControl::parameters_update(bool force)
 
 		/* Update of sonar parameters */
 		param_get(_sonar_params_handles._snr_activate_sw_h,&_sonar_params._snr_activate_sw);
-		param_get(_sonar_params_handles._snr_fwd_min_th_h,&_sonar_params._snr_fwd_min_th);
+		param_get(_sonar_params_handles._snr_activate_sw_h,&_sonar_params._snr_fwd_min_th);
 		param_get(_sonar_params_handles._snr_fwd_sig_ratio_h,&_sonar_params._snr_fwd_sig_ratio);
 		param_get(_sonar_params_handles._snr_fwd_max_th_h,&_sonar_params._snr_fwd_max_th);
 		param_get(_sonar_params_handles._snr_fwd_adc_ind_h,&_sonar_params._snr_fwd_adc_ind);
@@ -714,44 +711,16 @@ MulticopterPositionControl::control_offboard(float dt)
 	}
 }
 
-
-/*
- * Ratio function
- */
-
-float
- MulticopterPositionControl::ratio(int32_t value,int32_t min ,int32_t max )
- {
-	 float result = 0;
-	 if(value >= max)
-	 {
-		 result = 1.0;
-	 }
-	 else if(value <= min)
-	 {
-		 result = 0.0;
-	 }
-	 else
-	 {
-		 result = ((float)(value - min))/((float)(max - min));
-	 }
-	 return result;
- }
-
 /* Sonar override function */ // sl
 math::Vector<3>
-MulticopterPositionControl::sonar_override(float dt)
+MulticopterPositionControl::sonar_vel_override(float dt)
 {
 
 	/*Declaration*/
 	bool _updated;
 	math::Vector<3> _corr_vel;
-
-#ifdef DEBUG_SL
 	char debug_name_data[] = "ADC_data";
-	char debug_name_mean[] = "ADC_ratio";
-#endif
-
+	char debug_name_mean[] = "ADC_mean";
 
 
 	/*Initialization*/
@@ -767,18 +736,17 @@ MulticopterPositionControl::sonar_override(float dt)
 
 	/* Retrieving sonar data */
 
-	_forwardSonar = ratio(_adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value, _sonar_params._snr_fwd_min_th, _sonar_params._snr_fwd_max_th );
+	_forwardSonar = _adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value;
 
-#ifdef DEBUG_SL
 	if(debug_s)
 	{
 		memcpy(&_debug.key, &debug_name_data, strlen(debug_name_data)+1 );
-		_debug.value = _adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value;
+		_debug.value = _adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_data;
 	}
 	else
 	{
 		memcpy(&_debug.key, &debug_name_mean, strlen(debug_name_mean)+1 );
-		_debug.value = _forwardSonar;
+		_debug.value = _adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value;
 	}
 	debug_s = !debug_s;
 
@@ -790,7 +758,6 @@ MulticopterPositionControl::sonar_override(float dt)
 	{
 		_debug_pub = orb_advertise(ORB_ID(debug_key_value), &_debug);
 	}
-#endif
 
 	return _corr_vel;
 }
@@ -999,7 +966,7 @@ MulticopterPositionControl::task_main()
 				/* Sonar activation if activated */ 	//sl
 				if(_sonar_params._snr_activate_sw != 0)
 				{
-					_vel_sp = sonar_override(dt); /* Sonar velocity override function*/
+					_vel_sp = sonar_vel_override(dt); /* Sonar velocity override function*/
 				}
 
 				if (!_control_mode.flag_control_manual_enabled) {
