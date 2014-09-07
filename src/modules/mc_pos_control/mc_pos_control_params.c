@@ -231,7 +231,7 @@ PARAM_DEFINE_INT32(SNR_ACTIVATE_SW, 0);
  * @max 2500
  * @group Sonar
  */
-PARAM_DEFINE_INT32(SNR_FWD_MIN_TH, 80);
+PARAM_DEFINE_INT32(SNR_FWD_MIN_TH, 950);
 
 /**
  * Forward Significant Signal Threshold
