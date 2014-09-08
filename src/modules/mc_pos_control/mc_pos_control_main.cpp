@@ -79,6 +79,7 @@
 #define TILT_COS_MAX	0.7f
 #define SIGMA			0.000001f
 
+#define SONAR_NUMBER 1
 #define DEBUG_SL
 
 /**
@@ -169,7 +170,9 @@ private:
 	struct {
 		param_t _snr_activate_sw_h;
 		param_t _snr_fwd_min_th_h;
-		param_t _snr_fwd_sig_ratio_h;
+		param_t _snr_fwd_stab_ratio_h;
+		param_t _snr_fwd_wall_ratio_h;
+		param_t _snr_fwd_max_response_h;
 		param_t _snr_fwd_max_th_h;
 		param_t _snr_fwd_adc_ind_h;
 
@@ -178,7 +181,9 @@ private:
 	struct {
 		int _snr_activate_sw;
 		int _snr_fwd_min_th;
-		float _snr_fwd_sig_ratio;
+		float _snr_fwd_stab_ratio;
+		float _snr_fwd_wall_ratio;
+		float _snr_fwd_max_response;
 		int _snr_fwd_max_th;
 		int _snr_fwd_adc_ind;
 	}		_sonar_params;		/* Sonar parameters */
@@ -217,8 +222,8 @@ private:
 	/*
 	 * Sonar declarations
 	 */
-	float 	_forwardSonar;
-	bool debug_s;
+	float 	_sonar_input_value[3];
+	int debug_s;
 
 
 	/**
@@ -280,7 +285,8 @@ private:
 	/*
 	 * Sonar override functions
 	 */
-	math::Vector<3> sonar_override(float dt);
+	math::Vector<3> sonar_override(float dt, math::Vector<3> velocity_NED, math::Vector<3> velolity_setpoint_NED,float yaw_NED);
+	math::Vector<3> sonar_response(math::Vector<3> unity_body_vector, float sonar_input, float sonar_stab_value,float sonar_wall_value, float max);
 	float ratio (int32_t value,int32_t min ,int32_t max );
 
 
@@ -329,7 +335,8 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_reset_pos_sp(true),
 	_reset_alt_sp(true)
 {
-	debug_s = false;
+	debug_s = 0;
+	memset(&_sonar_input_value, 0, sizeof(_sonar_input_value));
 
 	memset(&_att, 0, sizeof(_att));
 	memset(&_att_sp, 0, sizeof(_att_sp));
@@ -384,7 +391,9 @@ MulticopterPositionControl::MulticopterPositionControl() :
 
 	_sonar_params_handles._snr_activate_sw_h = param_find("SNR_ACTIVATE_SW");
 	_sonar_params_handles._snr_fwd_min_th_h = param_find("SNR_FWD_MIN_TH");
-	_sonar_params_handles._snr_fwd_sig_ratio_h = param_find("SNR_FWD_SIG_RATIO");
+	_sonar_params_handles._snr_fwd_stab_ratio_h = param_find("SNR_FWD_STAB_RATIO");
+	_sonar_params_handles._snr_fwd_wall_ratio_h = param_find("SNR_FWD_WALL_RATIO");
+	_sonar_params_handles._snr_fwd_max_response_h = param_find("SNR_FWD_MAX_RESPONSE");
 	_sonar_params_handles._snr_fwd_max_th_h = param_find("SNR_FWD_MAX_TH");
 	_sonar_params_handles._snr_fwd_adc_ind_h = param_find("SNR_FWD_ADC_IND");
 
@@ -477,7 +486,9 @@ MulticopterPositionControl::parameters_update(bool force)
 		/* Update of sonar parameters */
 		param_get(_sonar_params_handles._snr_activate_sw_h,&_sonar_params._snr_activate_sw);
 		param_get(_sonar_params_handles._snr_fwd_min_th_h,&_sonar_params._snr_fwd_min_th);
-		param_get(_sonar_params_handles._snr_fwd_sig_ratio_h,&_sonar_params._snr_fwd_sig_ratio);
+		param_get(_sonar_params_handles._snr_fwd_stab_ratio_h,&_sonar_params._snr_fwd_stab_ratio);
+		param_get(_sonar_params_handles._snr_fwd_wall_ratio_h,&_sonar_params._snr_fwd_wall_ratio);
+		param_get(_sonar_params_handles._snr_fwd_max_response_h,&_sonar_params._snr_fwd_max_response);
 		param_get(_sonar_params_handles._snr_fwd_max_th_h,&_sonar_params._snr_fwd_max_th);
 		param_get(_sonar_params_handles._snr_fwd_adc_ind_h,&_sonar_params._snr_fwd_adc_ind);
 
@@ -720,7 +731,7 @@ MulticopterPositionControl::control_offboard(float dt)
  */
 
 float
- MulticopterPositionControl::ratio(int32_t value,int32_t min ,int32_t max )
+MulticopterPositionControl::ratio(int32_t value,int32_t min ,int32_t max )
  {
 	 float result = 0;
 	 if(value >= max)
@@ -738,50 +749,158 @@ float
 	 return result;
  }
 
-/* Sonar override function */ // sl
+
+/* Sonar Response function */
+
 math::Vector<3>
-MulticopterPositionControl::sonar_override(float dt)
+MulticopterPositionControl::sonar_response(math::Vector<3> unity_body_vector, float sonar_input, float sonar_stab_value,float sonar_wall_value, float max)
+{
+	/*Declaration */
+	math::Vector<3> _result_vector;
+	float temp_value;
+
+	/*Initialization */
+	_result_vector.zero();
+	temp_value = 0.0f;
+	/*Treatment*/
+	if(sonar_input < sonar_stab_value )	/* Do not take into account speed */
+	{
+		if(sonar_input < sonar_wall_value )
+		{
+			sonar_input = sonar_wall_value;
+		}
+
+		temp_value = max * (sonar_input-sonar_stab_value)/(sonar_wall_value-sonar_stab_value);
+		if(temp_value > max)	/* Add minimum to avoid division by zero */
+		{
+			temp_value = max;
+		}
+		if(temp_value < 0.0f)	/* Add minimum to avoid division by zero */
+		{
+			temp_value = 0.0f;
+		}
+		_result_vector =  - unity_body_vector * temp_value; //Simple function with wall behavior on sonar axis
+		//TODO : Add perpendicular axis behavior
+	}
+	return _result_vector;
+}
+
+/* Sonar override function */
+math::Vector<3>
+MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NED, math::Vector<3> velocity_setpoint_NED,float yaw_NED)
 {
 
 	/*Declaration*/
-	bool _updated;
-	math::Vector<3> _corr_vel;
-
+	bool _updated;  /* orb */
+	math::Vector<3> _temp_result_vel_sp;
+	math::Vector<3> _result_vel_sp_NED;
+	math::Matrix<3, 3> Rot_vect_body2NED;
+	math::Vector<3> _sonar_unity_vector[SONAR_NUMBER];
+	math::Vector<3> _sonar_temp_vector[SONAR_NUMBER];
+	bool flag;
 #ifdef DEBUG_SL
-	char debug_name_data[] = "ADC_data";
-	char debug_name_mean[] = "ADC_ratio";
+	char debug_name_01[] = "S_vel_spx";
+	char debug_name_02[] = "S_vel_spy";
+	char debug_name_03[] = "S_vel_spz";
+	char debug_name_04[] = "P_vel_spx";
+	char debug_name_05[] = "P_vel_spy";
+	char debug_name_06[] = "P_vel_spz";
 #endif
 
-
-
 	/*Initialization*/
-	_corr_vel.zero();
+	_temp_result_vel_sp.zero();
+	_result_vel_sp_NED.zero();
+	flag = false;
+	Rot_vect_body2NED.from_euler(0.0f, 0.0f, yaw_NED);
+	for(int i = 0 ; i<SONAR_NUMBER;i++)
+		{
+			_sonar_unity_vector[i].zero();					// All unity vector to zero
+			_sonar_temp_vector[i].zero();
+		}
+	_sonar_unity_vector[0](0) = 1.0f; 							//Vector [0] for first sonar (forward) on x body axis
 
 
-	/*Poll Check */
+	/*
+	 * Retrieving sonar data with orb
+	 */
 	orb_check(_adc_raw_data_sub, &_updated);
-
 	if (_updated) {
 		orb_copy(ORB_ID(adc_raw_data), _adc_raw_data_sub, &_adc_raw_data);
 	}
+	_sonar_input_value[0] = ratio(_adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value, _sonar_params._snr_fwd_min_th, _sonar_params._snr_fwd_max_th );
 
-	/* Retrieving sonar data */
 
-	_forwardSonar = ratio(_adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value, _sonar_params._snr_fwd_min_th, _sonar_params._snr_fwd_max_th );
-
-#ifdef DEBUG_SL
-	if(debug_s)
+	/* ************************************
+	 * Check if treatment needed
+	 * ************************************/
+	for(int sonar_index = 0; sonar_index < SONAR_NUMBER; sonar_index++ )
 	{
-		memcpy(&_debug.key, &debug_name_data, strlen(debug_name_data)+1 );
-		_debug.value = _adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value;
+		if(_sonar_input_value[sonar_index] < 1.0f )
+		{
+			flag = true;
+		}
+	}
+	/* ************************************
+	 * Treatment if needed
+	 * ************************************/
+	if(flag)
+	{
+		for(int sonar_index = 0; sonar_index < SONAR_NUMBER; sonar_index++ )
+		{
+			_sonar_temp_vector[sonar_index] = sonar_response(_sonar_unity_vector[sonar_index], _sonar_input_value[sonar_index], _sonar_params._snr_fwd_stab_ratio, _sonar_params._snr_fwd_wall_ratio, _sonar_params._snr_fwd_max_response);
+			_temp_result_vel_sp += _sonar_temp_vector[sonar_index];
+		}
+		_temp_result_vel_sp = Rot_vect_body2NED * _temp_result_vel_sp.emult(_params.vel_max); // From body 2 NED + Level adjustment
+
+
+	/* ************************************
+	 * Merge with initial velocity setpoint
+	 * ************************************/
+	_result_vel_sp_NED = _temp_result_vel_sp + velocity_setpoint_NED;
+
+
 	}
 	else
 	{
-		memcpy(&_debug.key, &debug_name_mean, strlen(debug_name_mean)+1 );
-		_debug.value = _forwardSonar;
+		_result_vel_sp_NED = velocity_setpoint_NED; // Nothing to change
 	}
-	debug_s = !debug_s;
 
+	/* ************************************
+	 * Treatment end
+	 * ************************************/
+
+#ifdef DEBUG_SL
+	if(debug_s == 0)
+	{
+		memcpy(&_debug.key, &debug_name_01, strlen(debug_name_01)+1 );
+		_debug.value = _result_vel_sp_NED(0);
+	}
+	else if(debug_s == 1)
+	{
+		memcpy(&_debug.key, &debug_name_02, strlen(debug_name_02)+1 );
+		_debug.value = _result_vel_sp_NED(1);
+	}
+	else if(debug_s == 2)
+		{
+			memcpy(&_debug.key, &debug_name_03, strlen(debug_name_03)+1 );
+			_debug.value = _result_vel_sp_NED(2);
+		}
+	else if(debug_s == 3)
+		{
+			memcpy(&_debug.key, &debug_name_04, strlen(debug_name_04)+1 );
+			_debug.value = velocity_setpoint_NED(0);
+		}
+	else if(debug_s == 4)
+		{
+			memcpy(&_debug.key, &debug_name_05, strlen(debug_name_05)+1 );
+			_debug.value = velocity_setpoint_NED(1);
+		}
+	else if(debug_s == 5)
+		{
+			memcpy(&_debug.key, &debug_name_06, strlen(debug_name_06)+1 );
+			_debug.value = velocity_setpoint_NED(2);
+		}
+	debug_s = (debug_s + 1) % 6;
 	if (_debug_pub > 0)
 	{
 		orb_publish(ORB_ID(debug_key_value), _debug_pub, &_debug);
@@ -791,8 +910,8 @@ MulticopterPositionControl::sonar_override(float dt)
 		_debug_pub = orb_advertise(ORB_ID(debug_key_value), &_debug);
 	}
 #endif
+	return _result_vel_sp_NED;
 
-	return _corr_vel;
 }
 
 
@@ -980,6 +1099,13 @@ MulticopterPositionControl::task_main()
 
 				_vel_sp = pos_err.emult(_params.pos_p) + _vel_ff;
 
+				/* Sonar activation if activated */ 	//sl
+				if(_sonar_params._snr_activate_sw != 0)
+				{
+					_vel_sp = sonar_override(dt,_vel, _vel_sp,_att.yaw); /* Sonar velocity override function*/
+				}
+
+
 				if (!_control_mode.flag_control_altitude_enabled) {
 					_reset_alt_sp = true;
 					_vel_sp(2) = 0.0f;
@@ -994,12 +1120,6 @@ MulticopterPositionControl::task_main()
 				/* use constant descend rate when landing, ignore altitude setpoint */
 				if (!_control_mode.flag_control_manual_enabled && _pos_sp_triplet.current.valid && _pos_sp_triplet.current.type == SETPOINT_TYPE_LAND) {
 					_vel_sp(2) = _params.land_speed;
-				}
-
-				/* Sonar activation if activated */ 	//sl
-				if(_sonar_params._snr_activate_sw != 0)
-				{
-					_vel_sp = sonar_override(dt); /* Sonar velocity override function*/
 				}
 
 				if (!_control_mode.flag_control_manual_enabled) {

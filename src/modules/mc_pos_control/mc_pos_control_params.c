@@ -234,14 +234,34 @@ PARAM_DEFINE_INT32(SNR_ACTIVATE_SW, 0);
 PARAM_DEFINE_INT32(SNR_FWD_MIN_TH, 950);
 
 /**
- * Forward Significant Signal Threshold
+ * Forward Significant Stabilisation Threshold
  *(...)
  * @unit none
- * @min 0
- * @max 2500
+ * @min 0.1
+ * @max 1.0
  * @group Sonar
  */
-PARAM_DEFINE_FLOAT(SNR_FWD_SIG_RATIO, 0.5f);
+PARAM_DEFINE_FLOAT(SNR_FWD_STAB_RATIO, 0.6f);
+
+/**
+ * Forward Significant Max Response
+ *Define the max response of the sonar ( before multiplied by max_velocity)
+ * @unit none
+ * @min 0.1
+ * @max 5.0
+ * @group Sonar
+ */
+PARAM_DEFINE_FLOAT(SNR_FWD_MAX_RESPONSE, 3.0f);
+
+/**
+ * Forward Significant Wall Threshold
+ *(...)
+ * @unit none
+ * @min 0.1
+ * @max 1.0
+ * @group Sonar
+ */
+PARAM_DEFINE_FLOAT(SNR_FWD_WALL_RATIO, 0.2f);
 
 /**
  * Forward Meaningful MAximum Signal Threshold
