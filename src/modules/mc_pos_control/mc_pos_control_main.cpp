@@ -224,6 +224,7 @@ private:
 	 */
 	float 	_sonar_input_value[3];
 	int debug_s;
+	bool _snr_activated_flag;
 
 
 	/**
@@ -281,16 +282,11 @@ private:
 	 * Main sensor collection task.
 	 */
 	void		task_main();
-
-	/*
-	 * Sonar override functions
+	/**
+	 * Sonar functions.
 	 */
-	float ratio (int32_t value,int32_t min ,int32_t max );
-	float dprod( math::Vector<3> vector_a, math::Vector<3> vector_b);
-	math::Vector<3> sonar_override(float dt, math::Vector<3> velocity_NED, math::Vector<3> velolity_setpoint_NED,float yaw_NED);
-
-
-
+	float	signal_ratio(int32_t value,int32_t min ,int32_t max);
+	math::Vector<3>		sonar_override(float dt, math::Vector<3> velocity_NED, math::Vector<3> velolity_setpoint_NED,float yaw_NED);
 };
 
 namespace pos_control
@@ -334,7 +330,8 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_ref_timestamp(0),
 
 	_reset_pos_sp(true),
-	_reset_alt_sp(true)
+	_reset_alt_sp(true),
+	_snr_activated_flag(false)
 {
 	debug_s = 0;
 	memset(&_sonar_input_value, 0, sizeof(_sonar_input_value));
@@ -492,6 +489,14 @@ MulticopterPositionControl::parameters_update(bool force)
 		param_get(_sonar_params_handles._snr_fwd_max_response_h,&_sonar_params._snr_fwd_max_response);
 		param_get(_sonar_params_handles._snr_fwd_max_th_h,&_sonar_params._snr_fwd_max_th);
 		param_get(_sonar_params_handles._snr_fwd_adc_ind_h,&_sonar_params._snr_fwd_adc_ind);
+		if(_sonar_params._snr_activate_sw != 0)
+		{
+			_snr_activated_flag = true;
+		}
+		else
+		{
+			_snr_activated_flag = false;
+		}
 
 	}
 
@@ -725,15 +730,9 @@ MulticopterPositionControl::control_offboard(float dt)
 		reset_alt_sp();
 	}
 }
-
-
-/*
- * Ratio function
- */
-
 float
-MulticopterPositionControl::ratio(int32_t value,int32_t min ,int32_t max )
- {
+MulticopterPositionControl::signal_ratio(int32_t value,int32_t min ,int32_t max)
+{
 	 float result = 0;
 	 if(value >= max)
 	 {
@@ -748,20 +747,7 @@ MulticopterPositionControl::ratio(int32_t value,int32_t min ,int32_t max )
 		 result = ((float)(value - min))/((float)(max - min));
 	 }
 	 return result;
- }
-
-float
-MulticopterPositionControl::dprod(math::Vector<3> vector_a, math::Vector<3> vector_b)
-{
-			float result = 0.0f;
-
-			for (unsigned int i = 0; i < 3; i++)
-			{
-				result += vector_a(i) * vector_b(i);
-			}
-			return result;
 }
-
 
 /* Sonar override function */
 math::Vector<3>
@@ -771,7 +757,7 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 	/*Declaration*/
 	bool _updated;  /* orb */
 
-	math::Vector<3> _temp_result_vel_sp;
+	math::Vector<3> _unity_vector_NED;
 	math::Vector<3> _result_vel_sp_NED;
 	math::Matrix<3, 3> Rot_vect_body2NED;
 	math::Vector<3> _sonar_unity_vector[SONAR_NUMBER];
@@ -787,7 +773,7 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 #endif
 
 	/*Initialization*/
-	_temp_result_vel_sp.zero();
+	_unity_vector_NED.zero();
 	_result_vel_sp_NED.zero();
 	flag = false;
 	Rot_vect_body2NED.from_euler(0.0f, 0.0f, yaw_NED);
@@ -807,7 +793,11 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 	if (_updated) {
 		orb_copy(ORB_ID(adc_raw_data), _adc_raw_data_sub, &_adc_raw_data);
 	}
-	_sonar_input_value[0] = ratio(_adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value, _sonar_params._snr_fwd_min_th, _sonar_params._snr_fwd_max_th );
+	for(int sonar_index = 0; sonar_index < SONAR_NUMBER; sonar_index++ )
+	{
+
+	}
+	_sonar_input_value[0] = signal_ratio(_adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value, _sonar_params._snr_fwd_min_th, _sonar_params._snr_fwd_max_th );
 
 
 	/* ************************************
@@ -834,24 +824,22 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 			{
 				/* Treatment sonar n */
 				/* Projection from body 2 NED of the unity vector for sonar n */
-				_temp_result_vel_sp = Rot_vect_body2NED * _sonar_unity_vector[sonar_index];
+				_unity_vector_NED = Rot_vect_body2NED * _sonar_unity_vector[sonar_index];
 
 				if(_sonar_input_value[sonar_index] < _sonar_params._snr_fwd_stab_ratio)
 				{
-					//_result_vel_sp_NED += - dotproduct(_result_vel_sp_NED,_temp_result_vel_sp) * _temp_result_vel_sp; /* Removing projection on sonar unity vector from setpoint vector */
-					_result_vel_sp_NED += - _sonar_params._snr_fwd_max_response * _temp_result_vel_sp; /* Adding correction vector in opposite direction of the sonar unity vector */
+					_result_vel_sp_NED -=  _unity_vector_NED * (_unity_vector_NED * _result_vel_sp_NED); /* Removing projection on sonar unity vector from setpoint vector */
+					_result_vel_sp_NED += - _unity_vector_NED * _sonar_params._snr_fwd_max_response; /* Adding correction vector in opposite direction of the sonar unity vector */
+				}
+				else
+				{
+					_result_vel_sp_NED -=  _unity_vector_NED * (_unity_vector_NED * _result_vel_sp_NED); /* Removing projection on sonar unity vector from setpoint vector */
 				}
 			}
 		}
 
 		/* Final velocity adjustments */
 		_result_vel_sp_NED(2) = velocity_setpoint_NED(2); /* No changes on z axis  -- Normally this is not necessary*/
-
-		/* ************************************
-		 * Merge with initial velocity setpoint
-		 * ************************************/
-		_result_vel_sp_NED = _temp_result_vel_sp;
-
 	}
 	else
 	{
@@ -1091,13 +1079,6 @@ MulticopterPositionControl::task_main()
 
 				_vel_sp = pos_err.emult(_params.pos_p) + _vel_ff;
 
-				/* Sonar activation if activated */ 	//sl
-				if(_sonar_params._snr_activate_sw != 0)
-				{
-					_vel_sp = sonar_override(dt,_vel, _vel_sp,_att.yaw); /* Sonar velocity override function*/
-				}
-
-
 				if (!_control_mode.flag_control_altitude_enabled) {
 					_reset_alt_sp = true;
 					_vel_sp(2) = 0.0f;
@@ -1122,7 +1103,16 @@ MulticopterPositionControl::task_main()
 						_vel_sp /= vel_sp_norm;
 					}
 				}
-
+				/*
+				 * Sonar activation if activated and velocity control enabled
+				 * ==> Activated for POSCTL, MISSION, LOITER, RETURN
+				 *
+				 * */ 	//sl
+				if(_snr_activated_flag && _control_mode.flag_control_velocity_enabled)
+				{
+					_vel_sp = sonar_override(dt,_vel, _vel_sp,_att.yaw); /* Sonar velocity override function*/
+					_sp_move_rate.zero(); /* External Control override */
+				}
 				_global_vel_sp.vx = _vel_sp(0);
 				_global_vel_sp.vy = _vel_sp(1);
 				_global_vel_sp.vz = _vel_sp(2);
@@ -1135,7 +1125,7 @@ MulticopterPositionControl::task_main()
 					_global_vel_sp_pub = orb_advertise(ORB_ID(vehicle_global_velocity_setpoint), &_global_vel_sp);
 				}
 
-				if (_control_mode.flag_control_climb_rate_enabled || _control_mode.flag_control_velocity_enabled) {
+				if (_control_mode.flag_control_climb_rate_enabled || _control_mode.flag_control_velocity_enabled ) {
 					/* reset integrals if needed */
 					if (_control_mode.flag_control_climb_rate_enabled) {
 						if (reset_int_z) {
@@ -1160,7 +1150,7 @@ MulticopterPositionControl::task_main()
 						reset_int_z = true;
 					}
 
-					if (_control_mode.flag_control_velocity_enabled) {
+					if (_control_mode.flag_control_velocity_enabled) { 	/* Consider sonar as a control velocity on xy plane */
 						if (reset_int_xy) {
 							reset_int_xy = false;
 							thrust_int(0) = 0.0f;
