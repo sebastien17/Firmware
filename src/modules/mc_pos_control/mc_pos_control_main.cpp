@@ -805,22 +805,24 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 	 * ************************************/
 	for(int sonar_index = 0; sonar_index < SONAR_NUMBER; sonar_index++ )
 	{
-		if(_sonar_input_value[sonar_index] < 1.0f )
+		if(_sonar_input_value[sonar_index] < 0.99f )
 		{
 			flag = true;
 		}
 	}
+
+
+	_result_vel_sp_NED = velocity_setpoint_NED; /* result initialization */
+
 	/* ************************************
 	 * Treatment if needed
 	 * ************************************/
 	if(flag)
 	{
-		_result_vel_sp_NED = velocity_setpoint_NED;
-
 		for(int sonar_index = 0; sonar_index < SONAR_NUMBER; sonar_index++ )
 		{
 			/* Sonar n activated */
-			if(_sonar_input_value[sonar_index] < 1.0f)
+			if(_sonar_input_value[sonar_index] < 0.99f)
 			{
 				/* Treatment sonar n */
 				/* Projection from body 2 NED of the unity vector for sonar n */
@@ -831,20 +833,12 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 					_result_vel_sp_NED -=  _unity_vector_NED * (_unity_vector_NED * _result_vel_sp_NED); /* Removing projection on sonar unity vector from setpoint vector */
 					_result_vel_sp_NED += - _unity_vector_NED * _sonar_params._snr_fwd_max_response; /* Adding correction vector in opposite direction of the sonar unity vector */
 				}
-				else
-				{
-					_result_vel_sp_NED -=  _unity_vector_NED * (_unity_vector_NED * _result_vel_sp_NED); /* Removing projection on sonar unity vector from setpoint vector */
-				}
 			}
 		}
-
 		/* Final velocity adjustments */
 		_result_vel_sp_NED(2) = velocity_setpoint_NED(2); /* No changes on z axis  -- Normally this is not necessary*/
 	}
-	else
-	{
-		_result_vel_sp_NED = velocity_setpoint_NED; // Nothing to change
-	}
+
 
 	/* ************************************
 	 * Treatment end
@@ -1111,7 +1105,6 @@ MulticopterPositionControl::task_main()
 				if(_snr_activated_flag && _control_mode.flag_control_velocity_enabled)
 				{
 					_vel_sp = sonar_override(dt,_vel, _vel_sp,_att.yaw); /* Sonar velocity override function*/
-					_sp_move_rate.zero(); /* External Control override */
 				}
 				_global_vel_sp.vx = _vel_sp(0);
 				_global_vel_sp.vy = _vel_sp(1);
