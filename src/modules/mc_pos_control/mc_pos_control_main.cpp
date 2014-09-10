@@ -72,7 +72,7 @@
 #include <systemlib/param/param.h>
 #include <systemlib/err.h>
 #include <systemlib/systemlib.h>
-#include <mathlib/mathlib.h>
+#include <lib/mathlib/mathlib.h>
 #include <lib/geo/geo.h>
 #include <mavlink/mavlink_log.h>
 
@@ -285,9 +285,10 @@ private:
 	/*
 	 * Sonar override functions
 	 */
-	math::Vector<3> sonar_override(float dt, math::Vector<3> velocity_NED, math::Vector<3> velolity_setpoint_NED,float yaw_NED);
-	math::Vector<3> sonar_response(math::Vector<3> unity_body_vector, float sonar_input, float sonar_stab_value,float sonar_wall_value, float max);
 	float ratio (int32_t value,int32_t min ,int32_t max );
+	float dprod( math::Vector<3> vector_a, math::Vector<3> vector_b);
+	math::Vector<3> sonar_override(float dt, math::Vector<3> velocity_NED, math::Vector<3> velolity_setpoint_NED,float yaw_NED);
+
 
 
 };
@@ -749,41 +750,18 @@ MulticopterPositionControl::ratio(int32_t value,int32_t min ,int32_t max )
 	 return result;
  }
 
-
-/* Sonar Response function */
-
-math::Vector<3>
-MulticopterPositionControl::sonar_response(math::Vector<3> unity_body_vector, float sonar_input, float sonar_stab_value,float sonar_wall_value, float max)
+float
+MulticopterPositionControl::dprod(math::Vector<3> vector_a, math::Vector<3> vector_b)
 {
-	/*Declaration */
-	math::Vector<3> _result_vector;
-	float temp_value;
+			float result = 0.0f;
 
-	/*Initialization */
-	_result_vector.zero();
-	temp_value = 0.0f;
-	/*Treatment*/
-	if(sonar_input < sonar_stab_value )	/* Do not take into account speed */
-	{
-		if(sonar_input < sonar_wall_value )
-		{
-			sonar_input = sonar_wall_value;
-		}
-
-		temp_value = max * (sonar_input-sonar_stab_value)/(sonar_wall_value-sonar_stab_value);
-		if(temp_value > max)	/* Add minimum to avoid division by zero */
-		{
-			temp_value = max;
-		}
-		if(temp_value < 0.0f)	/* Add minimum to avoid division by zero */
-		{
-			temp_value = 0.0f;
-		}
-		_result_vector =  - unity_body_vector * temp_value; //Simple function with wall behavior on sonar axis
-		//TODO : Add perpendicular axis behavior
-	}
-	return _result_vector;
+			for (unsigned int i = 0; i < 3; i++)
+			{
+				result += vector_a(i) * vector_b(i);
+			}
+			return result;
 }
+
 
 /* Sonar override function */
 math::Vector<3>
@@ -792,12 +770,13 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 
 	/*Declaration*/
 	bool _updated;  /* orb */
+
 	math::Vector<3> _temp_result_vel_sp;
 	math::Vector<3> _result_vel_sp_NED;
 	math::Matrix<3, 3> Rot_vect_body2NED;
 	math::Vector<3> _sonar_unity_vector[SONAR_NUMBER];
-	math::Vector<3> _sonar_temp_vector[SONAR_NUMBER];
 	bool flag;
+
 #ifdef DEBUG_SL
 	char debug_name_01[] = "S_vel_spx";
 	char debug_name_02[] = "S_vel_spy";
@@ -815,9 +794,10 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 	for(int i = 0 ; i<SONAR_NUMBER;i++)
 		{
 			_sonar_unity_vector[i].zero();					// All unity vector to zero
-			_sonar_temp_vector[i].zero();
 		}
-	_sonar_unity_vector[0](0) = 1.0f; 							//Vector [0] for first sonar (forward) on x body axis
+	_sonar_unity_vector[0](0) = 1.0f;							//Vector [0] for first sonar (forward) on x body axis
+	_sonar_unity_vector[1](1) = -1.0f;							//Vector [0] for second sonar (left) on x body axis
+	_sonar_unity_vector[2](1) = 1.0f;							//Vector [0] for third sonar (forward) on x body axis
 
 
 	/*
@@ -845,19 +825,32 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 	 * ************************************/
 	if(flag)
 	{
+		_result_vel_sp_NED = velocity_setpoint_NED;
+
 		for(int sonar_index = 0; sonar_index < SONAR_NUMBER; sonar_index++ )
 		{
-			_sonar_temp_vector[sonar_index] = sonar_response(_sonar_unity_vector[sonar_index], _sonar_input_value[sonar_index], _sonar_params._snr_fwd_stab_ratio, _sonar_params._snr_fwd_wall_ratio, _sonar_params._snr_fwd_max_response);
-			_temp_result_vel_sp += _sonar_temp_vector[sonar_index];
+			/* Sonar n activated */
+			if(_sonar_input_value[sonar_index] < 1.0f)
+			{
+				/* Treatment sonar n */
+				/* Projection from body 2 NED of the unity vector for sonar n */
+				_temp_result_vel_sp = Rot_vect_body2NED * _sonar_unity_vector[sonar_index];
+
+				if(_sonar_input_value[sonar_index] < _sonar_params._snr_fwd_stab_ratio)
+				{
+					//_result_vel_sp_NED += - dotproduct(_result_vel_sp_NED,_temp_result_vel_sp) * _temp_result_vel_sp; /* Removing projection on sonar unity vector from setpoint vector */
+					_result_vel_sp_NED += - _sonar_params._snr_fwd_max_response * _temp_result_vel_sp; /* Adding correction vector in opposite direction of the sonar unity vector */
+				}
+			}
 		}
-		_temp_result_vel_sp = Rot_vect_body2NED * _temp_result_vel_sp.emult(_params.vel_max); // From body 2 NED + Level adjustment
 
+		/* Final velocity adjustments */
+		_result_vel_sp_NED(2) = velocity_setpoint_NED(2); /* No changes on z axis  -- Normally this is not necessary*/
 
-	/* ************************************
-	 * Merge with initial velocity setpoint
-	 * ************************************/
-	_result_vel_sp_NED = _temp_result_vel_sp + velocity_setpoint_NED;
-
+		/* ************************************
+		 * Merge with initial velocity setpoint
+		 * ************************************/
+		_result_vel_sp_NED = _temp_result_vel_sp;
 
 	}
 	else
@@ -913,7 +906,6 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 	return _result_vel_sp_NED;
 
 }
-
 
 void
 MulticopterPositionControl::task_main()
@@ -1001,8 +993,8 @@ MulticopterPositionControl::task_main()
 		if (_control_mode.flag_control_altitude_enabled ||
 		    _control_mode.flag_control_position_enabled ||
 		    _control_mode.flag_control_climb_rate_enabled ||
-		    _control_mode.flag_control_velocity_enabled ||
-		    _sonar_params._snr_activate_sw != 0) { // sl
+		    _control_mode.flag_control_velocity_enabled )
+		{
 
 			_pos(0) = _local_pos.x;
 			_pos(1) = _local_pos.y;
