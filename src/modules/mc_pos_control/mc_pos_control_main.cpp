@@ -80,7 +80,7 @@
 #define SIGMA			0.000001f
 
 #define SONAR_NUMBER 1
-#define DEBUG_SL
+//#define DEBUG_SL
 
 /**
  * Multicopter position control app start / stop handling function
@@ -756,12 +756,11 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 
 	/*Declaration*/
 	bool _updated;  /* orb */
-
+	float dotproduct;
 	math::Vector<3> _unity_vector_NED;
 	math::Vector<3> _result_vel_sp_NED;
 	math::Matrix<3, 3> Rot_vect_body2NED;
 	math::Vector<3> _sonar_unity_vector[SONAR_NUMBER];
-	bool flag;
 
 #ifdef DEBUG_SL
 	char debug_name_01[] = "S_vel_spx";
@@ -770,21 +769,21 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 	char debug_name_04[] = "P_vel_spx";
 	char debug_name_05[] = "P_vel_spy";
 	char debug_name_06[] = "P_vel_spz";
+	char debug_name_07[] = "S_fsv";
 #endif
 
 	/*Initialization*/
 	_unity_vector_NED.zero();
 	_result_vel_sp_NED.zero();
-	flag = false;
-	Rot_vect_body2NED.from_euler(0.0f, 0.0f, yaw_NED);
+	Rot_vect_body2NED.from_euler(0.0f, 0.0f, yaw_NED);			/* Initialization of rotation vector from body to NED */
 	for(int i = 0 ; i<SONAR_NUMBER;i++)
 		{
-			_sonar_unity_vector[i].zero();					// All unity vector to zero
+			_sonar_unity_vector[i].zero();						/* All unity vector to zero */
 		}
-	_sonar_unity_vector[0](0) = 1.0f;							//Vector [0] for first sonar (forward) on x body axis
-	_sonar_unity_vector[1](1) = -1.0f;							//Vector [0] for second sonar (left) on x body axis
-	_sonar_unity_vector[2](1) = 1.0f;							//Vector [0] for third sonar (forward) on x body axis
-
+	_sonar_unity_vector[0](0) = 1.0f;							/*Vector [0] for first sonar (forward) on x body axis */
+	_sonar_unity_vector[1](1) = -1.0f;							/*Vector [1] for second sonar (left) on y body axis */
+	_sonar_unity_vector[2](1) = 1.0f;							/*Vector [2] for third sonar (right) on y body axis */
+	_result_vel_sp_NED = velocity_setpoint_NED; 				/* result initialization */
 
 	/*
 	 * Retrieving sonar data with orb
@@ -793,56 +792,64 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 	if (_updated) {
 		orb_copy(ORB_ID(adc_raw_data), _adc_raw_data_sub, &_adc_raw_data);
 	}
-	for(int sonar_index = 0; sonar_index < SONAR_NUMBER; sonar_index++ )
-	{
-
-	}
+	/* Forward sonar value */
 	_sonar_input_value[0] = signal_ratio(_adc_raw_data[_sonar_params._snr_fwd_adc_ind].am_mean_value, _sonar_params._snr_fwd_min_th, _sonar_params._snr_fwd_max_th );
+	/*Left sonar value */
+	_sonar_input_value[1] = 1.0f; // Not used
+	/*Right sonar value */
+	_sonar_input_value[2] = 1.0f; // Not used
 
 
-	/* ************************************
-	 * Check if treatment needed
-	 * ************************************/
-	for(int sonar_index = 0; sonar_index < SONAR_NUMBER; sonar_index++ )
+
+	/* ************************************************************************************************************************
+	 * Treatment if needed
+	 * ************************************************************************************************************************/
+
+	/* Left Right sonars */
+	if(_sonar_input_value[1] < 1.0f || _sonar_input_value[2] < 1.0f)
 	{
-		if(_sonar_input_value[sonar_index] < 0.99f )
-		{
-			flag = true;
-		}
+		//TODO :Add Left Right Sonar Algorithm
 	}
 
-
-	_result_vel_sp_NED = velocity_setpoint_NED; /* result initialization */
-
-	/* ************************************
-	 * Treatment if needed
-	 * ************************************/
-	if(flag)
+	/* Forward sonar */
+	if(_sonar_input_value[0] < 1.0f)
 	{
-		for(int sonar_index = 0; sonar_index < SONAR_NUMBER; sonar_index++ )
-		{
-			/* Sonar n activated */
-			if(_sonar_input_value[sonar_index] < 0.99f)
-			{
-				/* Treatment sonar n */
-				/* Projection from body 2 NED of the unity vector for sonar n */
-				_unity_vector_NED = Rot_vect_body2NED * _sonar_unity_vector[sonar_index];
+		/* Projection from body 2 NED of the forward unity vector */
+		_unity_vector_NED = Rot_vect_body2NED * _sonar_unity_vector[0];
+		dotproduct = (_unity_vector_NED * _result_vel_sp_NED);
 
-				if(_sonar_input_value[sonar_index] < _sonar_params._snr_fwd_stab_ratio)
-				{
-					_result_vel_sp_NED -=  _unity_vector_NED * (_unity_vector_NED * _result_vel_sp_NED); /* Removing projection on sonar unity vector from setpoint vector */
-					_result_vel_sp_NED += - _unity_vector_NED * _sonar_params._snr_fwd_max_response; /* Adding correction vector in opposite direction of the sonar unity vector */
-				}
+		if(_sonar_input_value[0] < _sonar_params._snr_fwd_stab_ratio)
+		{
+			_result_vel_sp_NED -= _unity_vector_NED * dotproduct; /* Removing projection on sonar unity vector from setpoint vector */
+			if(_sonar_input_value[0] < _sonar_params._snr_fwd_wall_ratio)
+			{
+				/* Case 0.0 < siv  < _snr_fwd_wall_ratio  */
+				_result_vel_sp_NED += - _unity_vector_NED * _sonar_params._snr_fwd_max_response; /* Adding max correction vector in opposite direction of the sonar unity vector */
+			}
+			else
+			{
+				/* Case _snr_fwd_wall_ratio < siv  < _snr_fwd_stab_ratio  */
+				_result_vel_sp_NED += - _unity_vector_NED * _sonar_params._snr_fwd_max_response * (_sonar_input_value[0] - _sonar_params._snr_fwd_stab_ratio)/(_sonar_params._snr_fwd_wall_ratio - _sonar_params._snr_fwd_stab_ratio); /* Adding proportional correction vector in opposite direction of the sonar unity vector */
 			}
 		}
-		/* Final velocity adjustments */
-		_result_vel_sp_NED(2) = velocity_setpoint_NED(2); /* No changes on z axis  -- Normally this is not necessary*/
+		else
+		{
+			/* Case _snr_fwd_stab_ratio < siv  < 1.0  */
+			if( dotproduct > 0.0f )
+			{
+				/*  Case velocity setpoint in same direction as forward sonar unity vector : going to the wall */
+				_result_vel_sp_NED -= _unity_vector_NED * dotproduct; /* Removing projection on sonar unity vector from setpoint vector */
+				_result_vel_sp_NED += _unity_vector_NED * dotproduct* (_sonar_input_value[0] - _sonar_params._snr_fwd_stab_ratio)/(1.0f - _sonar_params._snr_fwd_stab_ratio); /* Adding proportional correction vector in opposite direction of the sonar unity vector */
+			}
+		}
 	}
 
+	/* Final velocity adjustments */
+	_result_vel_sp_NED(2) = velocity_setpoint_NED(2); /* No changes on z axis  -- Normally this is not necessary*/
 
-	/* ************************************
+	/* ************************************************************************************************************************
 	 * Treatment end
-	 * ************************************/
+	 * ************************************************************************************************************************/
 
 #ifdef DEBUG_SL
 	if(debug_s == 0)
@@ -875,7 +882,12 @@ MulticopterPositionControl::sonar_override(float dt, math::Vector<3> velocity_NE
 			memcpy(&_debug.key, &debug_name_06, strlen(debug_name_06)+1 );
 			_debug.value = velocity_setpoint_NED(2);
 		}
-	debug_s = (debug_s + 1) % 6;
+	else if(debug_s == 6)
+		{
+			memcpy(&_debug.key, &debug_name_07, strlen(debug_name_07)+1 );
+			_debug.value = velocity_setpoint_NED(2);
+		}
+	debug_s = (debug_s + 1) % 7;
 	if (_debug_pub > 0)
 	{
 		orb_publish(ORB_ID(debug_key_value), _debug_pub, &_debug);

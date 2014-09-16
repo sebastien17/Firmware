@@ -53,12 +53,15 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <uORB/uORB.h>
+#include <uORB/topics/debug_key_value.h> //sl
 #include <uORB/topics/adc_raw_data.h>
+#include <uORB/topics/parameter_update.h>
 #include <drivers/drv_adc.h>
 #include <systemlib/systemlib.h>
 #include <systemlib/err.h>
+#include <systemlib/param/param.h>
 
-#define BLE_FACTOR 0.2
+#define DEBUG_SL
 
 /**
  * Multicopter attitude control app start / stop handling function
@@ -146,31 +149,53 @@ public:
 	 * Destructor, also kills the sensors task.
 	 */
 	~Px4_adc_reader();
+
 	/**
-		 * Start the task.
-		 *
-		 * @return		OK on success.
-		 */
+	 * Start the task.
+	 *
+	 * @return		OK on success.
+	 */
 	int		start();
 
 private:
 
-	bool	_task_should_exit;		/**< if true, sensor task should exit */
-	int		_control_task;			/**< task handle for sensor task */
-	int 	_fd;						/*file descriptor*/
-	orb_advert_t _adc_raw_data_t_h; 				/* file handle that will be used for publishing */
-	struct adc_msg_s _adc_data[12];       				/* make space for a maximum of twelve channels */
-	adc_raw_data_s _adc_data_m;       			/* Structure with additional info as mean value or validity make space for a maximum of twelve channels */
+	bool	_task_should_exit;				/**< if true, sensor task should exit */
+	int		_control_task;					/**< task handle for sensor task */
+	int 	_fd;							/*file descriptor*/
+	orb_advert_t _params_sub;				/* Handle to param sub topic */
+	orb_advert_t _adc_raw_data_t_h; 		/* file handle that will be used for publishing */
+	orb_advert_t 	_debug_pub;
+	struct adc_msg_s _adc_data[12];       	/* make space for a maximum of twelve channels */
+	adc_raw_data_s _adc_data_m;       		/* Structure with additional info as mean value or validity make space for a maximum of twelve channels */
+
+
+	struct {
+		param_t _snr_ble_factor_h;
+
+
+	}		_sonar_params_handles;		/*Handles for sonar parameters */
+
+	struct {
+		float _snr_ble_factor;
+
+	}		_sonar_params;		/* Sonar parameters */
+	struct debug_key_value_s _debug; 								/**< _debug structure */ //sl
 
 
 	/**
 	 * Shim for calling task_main from task_create.
 	 */
 	static void	task_main_trampoline(int argc, char *argv[]);
+
 	/**
 	 * Main attitude control task.
 	 */
 	void	task_main();
+
+	/**
+	 * Update our local parameter cache.
+	 */
+	int			parameters_update(bool force);
 };
 namespace px4_adc_reader_app
 {
@@ -197,10 +222,22 @@ Px4_adc_reader::Px4_adc_reader():
 	_task_should_exit(false),
 	_control_task(-1),
 	_fd(-1),
-	_adc_raw_data_t_h(-1)
+	_adc_raw_data_t_h(-1),
+	_debug_pub(-1)
 {
 	memset(&_adc_data, 0, sizeof(_adc_data));
 	memset(&_adc_data_m, 0, sizeof(_adc_data_m));
+	memset(&_debug, 0, sizeof(_debug));//sl
+
+
+	/* Subscriptions */
+	_params_sub = orb_subscribe(ORB_ID(parameter_update));
+
+	/*Sonar handles initialization */
+	_sonar_params_handles._snr_ble_factor_h = param_find("SNR_BLE_FACTOR");
+
+	/*Force parameter update */
+	parameters_update(true);
 }
 
 
@@ -228,6 +265,26 @@ Px4_adc_reader::~Px4_adc_reader()
 		px4_adc_reader_app::g_control = nullptr;
 };
 
+int
+Px4_adc_reader::parameters_update(bool force)
+{
+	bool updated;
+	struct parameter_update_s param_upd;
+
+	orb_check(_params_sub, &updated);
+
+	if (updated) {
+		orb_copy(ORB_ID(parameter_update), _params_sub, &param_upd);
+	}
+
+	if (updated || force)
+	{
+		/* Update of sonar parameters */
+		param_get(_sonar_params_handles._snr_ble_factor_h,&_sonar_params._snr_ble_factor);
+	}
+
+	return OK;
+}
 
 
 void
@@ -260,6 +317,13 @@ Px4_adc_reader::start()
 void
 Px4_adc_reader::task_main()
 {
+
+#ifdef DEBUG_SL
+	int debug_s = 0;
+	char debug_name_01[] = "S_f_Raw";
+	char debug_name_02[] = "S_f_LP";
+#endif
+
 	warnx("daemon] px4_adc_reader_app started");
 	fflush(stdout);
 	/*Open adc signal */
@@ -269,14 +333,17 @@ Px4_adc_reader::task_main()
 		_exit(0);
 		}
 	BrownLinearExpo _ble[12];
-	for(int i; i<11; i++)
+	for(int i = 0; i<11; i++)
 	{
-		_ble[i].set_factor(BLE_FACTOR);
+		_ble[i].set_factor(_sonar_params._snr_ble_factor );
 	}
 
 	while (!_task_should_exit)
 	{
 		/*Main Loop */
+
+		/*Check param change */
+		parameters_update(false);
 
 		/* read all channels available */
 		ssize_t count = read(_fd, &_adc_data, sizeof(_adc_data));
@@ -302,6 +369,29 @@ Px4_adc_reader::task_main()
 		} else {
 			_adc_raw_data_t_h = orb_advertise(ORB_ID(adc_raw_data), &_adc_data_m); /* Publish data with additional info for the first time */
 		}
+#ifdef DEBUG_SL
+	if(debug_s == 0)
+	{
+		memcpy(&_debug.key, &debug_name_01, strlen(debug_name_01)+1 );
+		_debug.value = _adc_data_m[7].am_data;
+	}
+	else if(debug_s == 1)
+	{
+		memcpy(&_debug.key, &debug_name_02, strlen(debug_name_02)+1 );
+		_debug.value = _adc_data_m[7].am_mean_value;
+	}
+	debug_s = (debug_s + 1) % 2;
+
+	if (_debug_pub > 0)
+	{
+		orb_publish(ORB_ID(debug_key_value), _debug_pub, &_debug);
+	}
+	else
+	{
+		_debug_pub = orb_advertise(ORB_ID(debug_key_value), &_debug);
+	}
+#endif
+
 		usleep(100000); /* 10 Hz update rate */
 	}
 	warnx("[daemon] px4_adc_reader_app exiting\n");
