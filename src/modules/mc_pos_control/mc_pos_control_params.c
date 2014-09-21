@@ -251,7 +251,7 @@ PARAM_DEFINE_FLOAT(SNR_FWD_STAB_RATIO, 0.6f);
  * @max 5.0
  * @group Sonar
  */
-PARAM_DEFINE_FLOAT(SNR_FWD_MAX_RESPONSE, 1.0f);
+PARAM_DEFINE_FLOAT(SNR_FWD_MAX_RESPONSE, 2.0f);
 
 /**
  * Forward Significant Wall Threshold

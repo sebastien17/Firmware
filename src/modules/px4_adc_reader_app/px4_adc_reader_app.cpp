@@ -167,7 +167,7 @@ private:
 	orb_advert_t 	_debug_pub;
 	struct adc_msg_s _adc_data[12];       	/* make space for a maximum of twelve channels */
 	adc_raw_data_s _adc_data_m;       		/* Structure with additional info as mean value or validity make space for a maximum of twelve channels */
-
+	BrownLinearExpo _ble[12];
 
 	struct {
 		param_t _snr_ble_factor_h;
@@ -227,8 +227,7 @@ Px4_adc_reader::Px4_adc_reader():
 {
 	memset(&_adc_data, 0, sizeof(_adc_data));
 	memset(&_adc_data_m, 0, sizeof(_adc_data_m));
-	memset(&_debug, 0, sizeof(_debug));//sl
-
+	memset(&_debug, 0, sizeof(_debug));
 
 	/* Subscriptions */
 	_params_sub = orb_subscribe(ORB_ID(parameter_update));
@@ -238,6 +237,7 @@ Px4_adc_reader::Px4_adc_reader():
 
 	/*Force parameter update */
 	parameters_update(true);
+
 }
 
 
@@ -281,6 +281,10 @@ Px4_adc_reader::parameters_update(bool force)
 	{
 		/* Update of sonar parameters */
 		param_get(_sonar_params_handles._snr_ble_factor_h,&_sonar_params._snr_ble_factor);
+		for(int i = 0; i<11; i++)
+		{
+			_ble[i].set_factor(_sonar_params._snr_ble_factor );
+		}
 	}
 
 	return OK;
@@ -301,7 +305,7 @@ Px4_adc_reader::start()
 	/* start the task */
 	_control_task = task_spawn_cmd("px4_adc_reader_app",
 				       SCHED_DEFAULT,
-				       SCHED_PRIORITY_MAX - 5,
+				       SCHED_PRIORITY_DEFAULT - 30,
 				       2000,
 				       (main_t)&Px4_adc_reader::task_main_trampoline,
 				       nullptr);
@@ -332,11 +336,6 @@ Px4_adc_reader::task_main()
 		warnx("ERROR: can't open ADC device");
 		_exit(0);
 		}
-	BrownLinearExpo _ble[12];
-	for(int i = 0; i<11; i++)
-	{
-		_ble[i].set_factor(_sonar_params._snr_ble_factor );
-	}
 
 	while (!_task_should_exit)
 	{
