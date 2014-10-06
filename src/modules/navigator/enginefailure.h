@@ -1,6 +1,6 @@
-/****************************************************************************
+/***************************************************************************
  *
- *   Copyright (c) 2014 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2014 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,36 +30,54 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
 /**
- * @file mavlink_commands.h
- * Mavlink commands stream definition.
+ * @file enginefailure.h
+ * Helper class for a fixedwing engine failure mode
  *
- * @author Anton Babushkin <anton.babushkin@me.com>
+ * @author Thomas Gubler <thomasgubler@gmail.com>
  */
 
-#ifndef MAVLINK_COMMANDS_H_
-#define MAVLINK_COMMANDS_H_
+#ifndef NAVIGATOR_ENGINEFAILURE_H
+#define NAVIGATOR_ENGINEFAILURE_H
 
-#include <uORB/uORB.h>
-#include <uORB/topics/vehicle_command.h>
+#include <controllib/blocks.hpp>
+#include <controllib/block/BlockParam.hpp>
 
-class Mavlink;
-class MavlinkCommansStream;
+#include <uORB/Subscription.hpp>
 
-#include "mavlink_main.h"
+#include "navigator_mode.h"
+#include "mission_block.h"
 
-class MavlinkCommandsStream
+class Navigator;
+
+class EngineFailure : public MissionBlock
 {
-private:
-	MavlinkOrbSubscription *_cmd_sub;
-	struct vehicle_command_s *_cmd;
-	mavlink_channel_t _channel;
-	uint64_t _cmd_time;
-
 public:
-	MavlinkCommandsStream(Mavlink *mavlink, mavlink_channel_t channel);
-	void update(const hrt_abstime t);
-};
+	EngineFailure(Navigator *navigator, const char *name);
 
-#endif /* MAVLINK_COMMANDS_H_ */
+	~EngineFailure();
+
+	virtual void on_inactive();
+
+	virtual void on_activation();
+
+	virtual void on_active();
+
+private:
+	enum EFState {
+		EF_STATE_NONE = 0,
+		EF_STATE_LOITERDOWN = 1,
+	} _ef_state;
+
+	/**
+	 * Set the DLL item
+	 */
+	void		set_ef_item();
+
+	/**
+	 * Move to next EF item
+	 */
+	void		advance_ef();
+
+};
+#endif

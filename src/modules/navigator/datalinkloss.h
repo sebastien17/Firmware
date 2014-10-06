@@ -1,6 +1,6 @@
-/****************************************************************************
+/***************************************************************************
  *
- *   Copyright (c) 2014 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2014 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,44 +30,69 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
 /**
- * @file mavlink_commands.cpp
- * Mavlink commands stream implementation.
+ * @file datalinkloss.h
+ * Helper class for Data Link Loss Mode acording to the OBC rules
  *
- * @author Anton Babushkin <anton.babushkin@me.com>
+ * @author Thomas Gubler <thomasgubler@gmail.com>
  */
 
-#include "mavlink_commands.h"
+#ifndef NAVIGATOR_DATALINKLOSS_H
+#define NAVIGATOR_DATALINKLOSS_H
 
-MavlinkCommandsStream::MavlinkCommandsStream(Mavlink *mavlink, mavlink_channel_t channel) :
-	_cmd_sub(mavlink->add_orb_subscription(ORB_ID(vehicle_command))),
-	_cmd{},
-	_channel(channel),
-	_cmd_time(0)
+#include <controllib/blocks.hpp>
+#include <controllib/block/BlockParam.hpp>
+
+#include <uORB/Subscription.hpp>
+
+#include "navigator_mode.h"
+#include "mission_block.h"
+
+class Navigator;
+
+class DataLinkLoss : public MissionBlock
 {
-}
+public:
+	DataLinkLoss(Navigator *navigator, const char *name);
 
-void
-MavlinkCommandsStream::update(const hrt_abstime t)
-{
-	struct vehicle_command_s cmd;
+	~DataLinkLoss();
 
-	if (_cmd_sub->update(&_cmd_time, &cmd)) {
-		/* only send commands for other systems/components */
-		if (cmd.target_system != mavlink_system.sysid || cmd.target_component != mavlink_system.compid) {
-			mavlink_msg_command_long_send(_channel,
-						      cmd.target_system,
-						      cmd.target_component,
-						      cmd.command,
-						      cmd.confirmation,
-						      cmd.param1,
-						      cmd.param2,
-						      cmd.param3,
-						      cmd.param4,
-						      cmd.param5,
-						      cmd.param6,
-						      cmd.param7);
-		}
-	}
-}
+	virtual void on_inactive();
+
+	virtual void on_activation();
+
+	virtual void on_active();
+
+private:
+	/* Params */
+	control::BlockParamFloat _param_commsholdwaittime;
+	control::BlockParamInt _param_commsholdlat; // * 1e7
+	control::BlockParamInt _param_commsholdlon; // * 1e7
+	control::BlockParamFloat _param_commsholdalt;
+	control::BlockParamInt _param_airfieldhomelat; // * 1e7
+	control::BlockParamInt _param_airfieldhomelon; // * 1e7
+	control::BlockParamFloat _param_airfieldhomealt;
+	control::BlockParamFloat _param_airfieldhomewaittime;
+	control::BlockParamInt _param_numberdatalinklosses;
+	control::BlockParamInt _param_skipcommshold;
+
+	enum DLLState {
+		DLL_STATE_NONE = 0,
+		DLL_STATE_FLYTOCOMMSHOLDWP = 1,
+		DLL_STATE_FLYTOAIRFIELDHOMEWP = 2,
+		DLL_STATE_TERMINATE = 3,
+		DLL_STATE_END = 4
+	} _dll_state;
+
+	/**
+	 * Set the DLL item
+	 */
+	void		set_dll_item();
+
+	/**
+	 * Move to next DLL item
+	 */
+	void		advance_dll();
+
+};
+#endif
